@@ -234,14 +234,17 @@ Bug fixes, calendar or I/O adapters, parity tests, and documentation edits are w
 
 If you use `marine-extremes` in research or operational work, cite the package alongside the underlying methodology papers (for example Hobday et al., 2016; Hobday et al., 2018; Schlegel et al., 2021):
 
+> Ren, J. (2026). *marine-extremes: Rust-accelerated detection of marine heatwaves, marine cold spells, and marine extremes* (Version 0.1.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.24579203
+
 ```bibtex
 @software{marine_extremes,
-  author  = {Ren, Jie},
-  title   = {marine-extremes: Rust-Accelerated Marine Heatwave, Cold Spell, and Marine Extreme Detection},
-  version = {0.1.0},
-  year    = {2026},
-  doi     = {10.5281/zenodo.24579203},
-  url     = {https://github.com/Radianjayjay/marine-extremes}
+  author    = {Ren, Jie},
+  title     = {marine-extremes: Rust-accelerated detection of marine heatwaves, marine cold spells, and marine extremes},
+  version   = {0.1.0},
+  year      = {2026},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.24579203},
+  url       = {https://github.com/Radianjayjay/marine-extremes}
 }
 ```
 

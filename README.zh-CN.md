@@ -234,14 +234,17 @@ python benchmarks/bench_global_scale.py
 
 若你在学术论文或业务工作流中使用了 `marine-extremes`，请在引用基础方法学文献（如 Hobday et al., 2016；Hobday et al., 2018；Schlegel et al., 2021）的同时引用本软件包：
 
+> Ren, J. (2026). *marine-extremes: Rust-accelerated detection of marine heatwaves, marine cold spells, and marine extremes* (Version 0.1.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.24579203
+
 ```bibtex
 @software{marine_extremes,
-  author  = {Ren, Jie},
-  title   = {marine-extremes: Rust-Accelerated Marine Heatwave, Cold Spell, and Marine Extreme Detection},
-  version = {0.1.0},
-  year    = {2026},
-  doi     = {10.5281/zenodo.24579203},
-  url     = {https://github.com/Radianjayjay/marine-extremes}
+  author    = {Ren, Jie},
+  title     = {marine-extremes: Rust-accelerated detection of marine heatwaves, marine cold spells, and marine extremes},
+  version   = {0.1.0},
+  year      = {2026},
+  publisher = {Zenodo},
+  doi       = {10.5281/zenodo.24579203},
+  url       = {https://github.com/Radianjayjay/marine-extremes}
 }
 ```
 

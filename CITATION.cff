@@ -1,5 +1,5 @@
 cff-version: 1.2.0
-title: "marine-extremes"
+title: "marine-extremes: Rust-accelerated detection of marine heatwaves, marine cold spells, and marine extremes"
 message: "If you use this software, please cite it using the metadata from this file."
 type: software
 authors:
@@ -34,6 +34,7 @@ keywords:
   - netcdf
 license: MIT
 version: "0.1.0"
+date-released: "2026-11-27"
 contact:
   - family-names: "Ren"
     given-names: "Jie"
