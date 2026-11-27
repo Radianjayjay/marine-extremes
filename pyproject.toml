@@ -31,6 +31,7 @@ classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Programming Language :: Rust",
     "Topic :: Scientific/Engineering :: Atmospheric Science",
     "Topic :: Scientific/Engineering :: Physics",
@@ -46,6 +47,7 @@ dependencies = [
 Homepage = "https://github.com/Radianjayjay/marine-extremes"
 Repository = "https://github.com/Radianjayjay/marine-extremes"
 Issues = "https://github.com/Radianjayjay/marine-extremes/issues"
+Changelog = "https://github.com/Radianjayjay/marine-extremes/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 netcdf = ["netCDF4>=1.6", "h5netcdf>=1.3", "cftime>=1.6", "dask>=2023.6"]
@@ -67,6 +69,7 @@ dev = ["pytest>=7.4", "maturin>=1.7"]
 python-source = "python"
 module-name = "marine_extremes._core"
 features = ["pyo3/extension-module"]
+exclude = ["docs/figures/*", "docs/marine_extremes_overview.html"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

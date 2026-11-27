@@ -1,15 +1,16 @@
 # marine-extremes
 
-[![CI & Wheels](https://github.com/Radianjayjay/marine-extremes/actions/workflows/ci.yml/badge.svg)](https://github.com/Radianjayjay/marine-extremes/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Python >= 3.11](https://img.shields.io/badge/Python-%3E%3D3.11-3776AB.svg)](pyproject.toml)
-[![Rust Core](https://img.shields.io/badge/Core-Rust%20%2B%20Rayon-DEA584.svg)](Cargo.toml)
+[![CI](https://github.com/Radianjayjay/marine-extremes/actions/workflows/ci.yml/badge.svg)](https://github.com/Radianjayjay/marine-extremes/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/marine-extremes.svg)](https://pypi.org/project/marine-extremes/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/Radianjayjay/marine-extremes/blob/main/LICENSE)
+[![Python >= 3.11](https://img.shields.io/badge/Python-%3E%3D3.11-3776AB.svg)](https://github.com/Radianjayjay/marine-extremes/blob/main/pyproject.toml)
+[![Rust Core](https://img.shields.io/badge/Core-Rust%20%2B%20Rayon-DEA584.svg)](https://github.com/Radianjayjay/marine-extremes/blob/main/Cargo.toml)
 
-**English** | [简体中文](README.zh-CN.md)
+**English** | [简体中文](https://github.com/Radianjayjay/marine-extremes/blob/main/README.zh-CN.md)
 
 `marine-extremes` is a Rust-accelerated Python package for detecting marine heatwaves (MHWs), marine cold spells (MCSs), and general scalar marine extremes such as salinity anomalies. It works on 1D station records, 3D surface grids (NOAA OISST, OSTIA), 4D depth-resolved ocean reanalyses (GLORYS, ORAS5, Argo), and multi-calendar CMIP6 simulations.
 
-An interactive architecture walkthrough is available in [docs/marine_extremes_overview.html](docs/marine_extremes_overview.html).
+An interactive architecture walkthrough is available in [docs/marine_extremes_overview.html](https://github.com/Radianjayjay/marine-extremes/blob/main/docs/marine_extremes_overview.html).
 
 ## What it does
 
@@ -25,24 +26,32 @@ An interactive architecture walkthrough is available in [docs/marine_extremes_ov
 
 ## Installation
 
-Building from source requires a Rust toolchain:
+Install prebuilt wheels from PyPI (no Rust toolchain required on Linux, macOS, or Windows):
 
 ```bash
-git clone https://github.com/Radianjayjay/marine-extremes.git
-cd marine-extremes
+# Core package (NumPy, Pandas, PyArrow, Xarray)
+pip install marine-extremes
 
-# Build release extension with all optional I/O backends (NetCDF4, HDF5/MAT, Zarr, cftime, Dask)
-pip install maturin
-maturin develop --release --extras io
+# Recommended: include all I/O backends (NetCDF4, HDF5/MAT, Zarr, cftime, Dask)
+pip install "marine-extremes[io]"
 ```
 
-Optional dependency groups in [pyproject.toml](pyproject.toml):
+Optional dependency groups in [pyproject.toml](https://github.com/Radianjayjay/marine-extremes/blob/main/pyproject.toml):
 
 - `marine-extremes[netcdf]`: `netCDF4`, `h5netcdf`, `cftime`, `dask`
 - `marine-extremes[mat]`: `h5py`, `scipy` (MATLAB v7.3 and v5 `.mat`)
 - `marine-extremes[zarr]`: `zarr>=3.0`, `cftime`, `dask`
 - `marine-extremes[io]`: all of the above
 - `marine-extremes[dev]`: `pytest`, `maturin`
+
+To build from source instead (requires a Rust toolchain):
+
+```bash
+git clone https://github.com/Radianjayjay/marine-extremes.git
+cd marine-extremes
+pip install maturin
+maturin develop --release --extras io
+```
 
 ## Quick start
 
@@ -89,9 +98,9 @@ python examples/quickstart.py
 
 ## Benchmarks and verification
 
-![marine-extremes v0.1.0 speed, peak memory, and scalability](docs/figures/benchmark_perf_en.png)
+![marine-extremes v0.1.0 speed, peak memory, and scalability](https://raw.githubusercontent.com/Radianjayjay/marine-extremes/main/docs/figures/benchmark_perf_en.png)
 
-![marine-extremes v0.1.0 cross-tool numerical accuracy and event parity](docs/figures/benchmark_accuracy_en.png)
+![marine-extremes v0.1.0 cross-tool numerical accuracy and event parity](https://raw.githubusercontent.com/Radianjayjay/marine-extremes/main/docs/figures/benchmark_accuracy_en.png)
 
 Measured on real NOAA OISST v2.1 daily SST (1982-2025, 16,071 daily steps, 1982-2011 baseline) on Linux (Intel Core i9-10920X, 12C/24T @ 3.5 GHz, 30 GiB RAM) using isolated subprocesses (`perf_counter` wall time and `/usr/bin/time -v` peak RSS). Peer versions: `heatwave3 1.5.0` (24 threads, `roundClm=False`), MATLAB R2025b `m_mhw1.0` (`detectc.m`), `mhw-detect 0.2.3` (Numba `0.68.1`), `ecjoliver/marineHeatWaves.py` (patched for NumPy 2), and `xmhw`.
 
@@ -248,4 +257,4 @@ If you use `marine-extremes` in research or operational work, cite the package a
 
 ## License
 
-MIT License. See [LICENSE](LICENSE).
+MIT License. See [LICENSE](https://github.com/Radianjayjay/marine-extremes/blob/main/LICENSE).

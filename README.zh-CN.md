@@ -1,6 +1,7 @@
 # marine-extremes
 
-[![CI & Wheels](https://github.com/Radianjayjay/marine-extremes/actions/workflows/ci.yml/badge.svg)](https://github.com/Radianjayjay/marine-extremes/actions/workflows/ci.yml)
+[![CI](https://github.com/Radianjayjay/marine-extremes/actions/workflows/ci.yml/badge.svg)](https://github.com/Radianjayjay/marine-extremes/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/marine-extremes.svg)](https://pypi.org/project/marine-extremes/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python >= 3.11](https://img.shields.io/badge/Python-%3E%3D3.11-3776AB.svg)](pyproject.toml)
 [![Rust Core](https://img.shields.io/badge/Core-Rust%20%2B%20Rayon-DEA584.svg)](Cargo.toml)
@@ -25,15 +26,14 @@
 
 ## 安装
 
-从源码编译需要本机安装 Rust 工具链：
+直接从 PyPI 安装预编译包（Linux、macOS、Windows 均无需本机 Rust 工具链）：
 
 ```bash
-git clone https://github.com/Radianjayjay/marine-extremes.git
-cd marine-extremes
+# 核心包（NumPy、Pandas、PyArrow、Xarray）
+pip install marine-extremes
 
-# 编译安装 Release 扩展并附带全部可选 I/O 后端（NetCDF4、HDF5/MAT、Zarr、cftime、Dask）
-pip install maturin
-maturin develop --release --extras io
+# 推荐：附带全部 I/O 后端（NetCDF4、HDF5/MAT、Zarr、cftime、Dask）
+pip install "marine-extremes[io]"
 ```
 
 [pyproject.toml](pyproject.toml) 中的可选依赖组：
@@ -43,6 +43,15 @@ maturin develop --release --extras io
 - `marine-extremes[zarr]`：`zarr>=3.0`、`cftime`、`dask`
 - `marine-extremes[io]`：以上全部格式支持
 - `marine-extremes[dev]`：`pytest`、`maturin`
+
+从源码编译安装（需本机 Rust 工具链）：
+
+```bash
+git clone https://github.com/Radianjayjay/marine-extremes.git
+cd marine-extremes
+pip install maturin
+maturin develop --release --extras io
+```
 
 ## 快速上手
 
