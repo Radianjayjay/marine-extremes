@@ -1,15 +1,15 @@
-# marxtreme
+# marine-extremes
 
-[![CI & Wheels](https://github.com/Radianjayjay/marxtreme/actions/workflows/ci.yml/badge.svg)](https://github.com/Radianjayjay/marxtreme/actions/workflows/ci.yml)
+[![CI & Wheels](https://github.com/Radianjayjay/marine-extremes/actions/workflows/ci.yml/badge.svg)](https://github.com/Radianjayjay/marine-extremes/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python >= 3.11](https://img.shields.io/badge/Python-%3E%3D3.11-3776AB.svg)](pyproject.toml)
 [![Rust Core](https://img.shields.io/badge/Core-Rust%20%2B%20Rayon-DEA584.svg)](Cargo.toml)
 
 [English](README.md) | **简体中文**
 
-`marxtreme`（*Marine Extremes*）是一个用 Rust 加速的 Python 海洋极端事件检测库，用于识别海洋热浪（MHW）、海洋冷事件（MCS）以及盐度异常等通用标量海洋极端事件。它适用于 1D 站点观测、3D 海表网格（NOAA OISST、OSTIA）、4D 带深度维海洋再分析数据（GLORYS、ORAS5、Argo）以及多日历 CMIP6 气候模式数据。
+`marine-extremes` 是一个用 Rust 加速的 Python 海洋极端事件检测库，用于识别海洋热浪（MHW）、海洋冷事件（MCS）以及盐度异常等通用标量海洋极端事件。它适用于 1D 站点观测、3D 海表网格（NOAA OISST、OSTIA）、4D 带深度维海洋再分析数据（GLORYS、ORAS5、Argo）以及多日历 CMIP6 气候模式数据。
 
-架构与模块图示可在浏览器中打开 [docs/marxtreme_overview.html](docs/marxtreme_overview.html) 查看。
+架构与模块图示可在浏览器中打开 [docs/marine_extremes_overview.html](docs/marine_extremes_overview.html) 查看。
 
 ## 主要功能
 
@@ -28,8 +28,8 @@
 从源码编译需要本机安装 Rust 工具链：
 
 ```bash
-git clone https://github.com/Radianjayjay/marxtreme.git
-cd marxtreme
+git clone https://github.com/Radianjayjay/marine-extremes.git
+cd marine-extremes
 
 # 编译安装 Release 扩展并附带全部可选 I/O 后端（NetCDF4、HDF5/MAT、Zarr、cftime、Dask）
 pip install maturin
@@ -38,16 +38,16 @@ maturin develop --release --extras io
 
 [pyproject.toml](pyproject.toml) 中的可选依赖组：
 
-- `marxtreme[netcdf]`：`netCDF4`、`h5netcdf`、`cftime`、`dask`
-- `marxtreme[mat]`：`h5py`、`scipy`（MATLAB v7.3 与 v5 `.mat`）
-- `marxtreme[zarr]`：`zarr>=3.0`、`cftime`、`dask`
-- `marxtreme[io]`：以上全部格式支持
-- `marxtreme[dev]`：`pytest`、`maturin`
+- `marine-extremes[netcdf]`：`netCDF4`、`h5netcdf`、`cftime`、`dask`
+- `marine-extremes[mat]`：`h5py`、`scipy`（MATLAB v7.3 与 v5 `.mat`）
+- `marine-extremes[zarr]`：`zarr>=3.0`、`cftime`、`dask`
+- `marine-extremes[io]`：以上全部格式支持
+- `marine-extremes[dev]`：`pytest`、`maturin`
 
 ## 快速上手
 
 ```python
-import marxtreme as mx
+import marine_extremes as mx
 
 res = mx.detect(
     "data/OISST_1982_2025_r360x180.nc",
@@ -89,9 +89,9 @@ python examples/quickstart.py
 
 ## 性能与精度验证
 
-![marxtreme v0.1.0 速度、峰值内存与扩展性对比](docs/figures/benchmark_perf_zh.png)
+![marine-extremes v0.1.0 速度、峰值内存与扩展性对比](docs/figures/benchmark_perf_zh.png)
 
-![marxtreme v0.1.0 跨工具数值精度与逐事件一致性验证](docs/figures/benchmark_accuracy_zh.png)
+![marine-extremes v0.1.0 跨工具数值精度与逐事件一致性验证](docs/figures/benchmark_accuracy_zh.png)
 
 上述测试基于真实 NOAA OISST v2.1 逐日海温（1982-2025，16,071 天，基准期 1982-2011），在 Linux（Intel Core i9-10920X，12 核 24 线程 @ 3.5 GHz，30 GiB 内存）下以独立子进程执行，运行时间取 `perf_counter`，峰值内存由 `/usr/bin/time -v` 采集。参测工具版本：`heatwave3 1.5.0`（24 线程，`roundClm=False`）、MATLAB R2025b `m_mhw1.0`（`detectc.m`）、`mhw-detect 0.2.3`（Numba `0.68.1`）、`ecjoliver/marineHeatWaves.py`（修补 NumPy 2 兼容性后运行）及 `xmhw`。
 
@@ -99,7 +99,7 @@ python examples/quickstart.py
 
 ### 功能对比
 
-| 能力维度 | `marxtreme` | `heatwave3` | `m_mhw1.0` | `heatwaveR` | `marineHeatWaves` | `xmhw` | `mhw-detect` |
+| 能力维度 | `marine-extremes` | `heatwave3` | `m_mhw1.0` | `heatwaveR` | `marineHeatWaves` | `xmhw` | `mhw-detect` |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | 核心引擎 | Rust + Rayon | C++ + OpenMP | MATLAB | R + Rcpp | Python | xarray + Dask | Python + Numba |
 | 单遍同步 MHW + MCS | 支持 | 否（两遍） | 否（两遍） | 否（两遍） | 否（两遍） | 否（两遍） | 否 |
@@ -148,10 +148,11 @@ python examples/quickstart.py
 ## 项目结构
 
 ```text
-marxtreme/
+marine-extremes/
 ├── Cargo.toml                        # Rust crate 配置（PyO3 0.30、rust-numpy 0.30、Rayon 1.12）
 ├── pyproject.toml                    # Python 打包与 maturin 构建配置
 ├── LICENSE                           # MIT 许可证
+├── CITATION.cff                      # 引用元数据（GitHub 与 Zenodo）
 ├── README.md                         # 英文文档（默认）
 ├── README.zh-CN.md                   # 简体中文文档
 ├── src/                              # Rust 并行计算核心
@@ -160,7 +161,7 @@ marxtreme/
 │   ├── quantile.rs                   # Type-7 与 Type-5（Hazen）分位数实现
 │   ├── baseline.rs                   # OLS 去趋势、WindowPlan、MovingSchedule 与循环平滑
 │   └── detect.rs                     # 短缺测插值、阈值扫描、传递合并间隙、事件指标与分级
-├── python/marxtreme/                 # Python 编排与单文件持久化层
+├── python/marine_extremes/           # Python 编排与单文件持久化层
 │   ├── __init__.py                   # 公共导出接口（detect、compute_climatology、open、各类基线）
 │   ├── api.py                        # 高层入口（detect、compute_climatology）
 │   ├── baselines.py                  # 基线规格定义与 PreparedBaseline 执行适配器
@@ -175,13 +176,13 @@ marxtreme/
 ├── benchmarks/bench_global_scale.py  # 合成全球规模吞吐量基准脚本
 ├── docs/
 │   ├── figures/                      # 双语 README 性能与精度对比图表
-│   └── marxtreme_overview.html       # 交互式图文架构总览页面
+│   └── marine_extremes_overview.html # 交互式图文架构总览页面
 └── .github/workflows/ci.yml          # 多 Python 版本 CI 与跨平台 wheel 构建流程
 ```
 
 ## 适用范围
 
-`marxtreme` 负责逐格点 1D-4D 海洋极端事件检测与单文件持久化，不包含 3D/4D 空间连通体目标追踪、垂向海洋热含量积分或自动垂向模态分类。
+`marine-extremes` 负责逐格点 1D-4D 海洋极端事件检测与单文件持久化，不包含 3D/4D 空间连通体目标追踪、垂向海洋热含量积分或自动垂向模态分类。
 
 ## 开发与测试
 
@@ -203,7 +204,7 @@ python benchmarks/bench_global_scale.py
 
 不同海洋极端事件工具（MATLAB `m_mhw1.0`、Python `marineHeatWaves` / `xmhw`、R `heatwaveR`、C++ `heatwave3`）之间的细微数值差异，来自各工具在分位数插值（Type-5 Hazen 与 Type-7）、超阈值不等号（`>=` 与 `>`）、2 月 29 日插值时机、事件方差自由度（`ddof=0` 与 `ddof=1`）以及跨年边界窗口环绕上的不同约定。如需复现特定工具结果，可显式传入 `compat="m_mhw"`、`"oliver"`、`"heatwaveR"` 或 `"standard"`（见[跨工具兼容预设](#跨工具兼容预设)与[性能与精度验证](#性能与精度验证)）。
 
-如遇到缺陷、特殊日历边界或 I/O 兼容问题，可在 [GitHub Issues](https://github.com/Radianjayjay/marxtreme/issues) 提交反馈，并附上 `marxtreme` 版本、Python 与系统环境以及最小复现示例。
+如遇到缺陷、特殊日历边界或 I/O 兼容问题，可在 [GitHub Issues](https://github.com/Radianjayjay/marine-extremes/issues) 提交反馈，并附上 `marine-extremes` 版本、Python 与系统环境以及最小复现示例。
 
 ## 参与贡献
 
@@ -217,19 +218,19 @@ python benchmarks/bench_global_scale.py
    pytest -v
    ```
 3. 涉及行为变更或缺陷修复时，在 `tests/` 中补充单元测试或回归测试。
-4. 通过 Pull Request 提交代码，或先在 [GitHub Issues](https://github.com/Radianjayjay/marxtreme/issues) 发起讨论。
+4. 通过 Pull Request 提交代码，或先在 [GitHub Issues](https://github.com/Radianjayjay/marine-extremes/issues) 发起讨论。
 
 ## 引用方式
 
-若你在学术论文或业务工作流中使用了 `marxtreme`，请在引用基础方法学文献（如 Hobday et al., 2016；Hobday et al., 2018；Schlegel et al., 2021）的同时引用本软件包：
+若你在学术论文或业务工作流中使用了 `marine-extremes`，请在引用基础方法学文献（如 Hobday et al., 2016；Hobday et al., 2018；Schlegel et al., 2021）的同时引用本软件包：
 
 ```bibtex
-@software{marxtreme,
-  author  = {Radianjayjay and marxtreme contributors},
-  title   = {marxtreme: Rust-Accelerated Marine Heatwave, Cold Spell, and Marine Extreme Detection},
+@software{marine_extremes,
+  author  = {Ren, Jie},
+  title   = {marine-extremes: Rust-Accelerated Marine Heatwave, Cold Spell, and Marine Extreme Detection},
   version = {0.1.0},
   year    = {2026},
-  url     = {https://github.com/Radianjayjay/marxtreme}
+  url     = {https://github.com/Radianjayjay/marine-extremes}
 }
 ```
 

@@ -1,4 +1,4 @@
-"""Throughput & memory benchmark for marxtreme on realistic global-scale synthetic ocean grids."""
+"""Throughput & memory benchmark for marine-extremes on realistic global-scale synthetic ocean grids."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-import marxtreme as mx
+import marine_extremes as mx
 
 
 def run_benchmark() -> None:

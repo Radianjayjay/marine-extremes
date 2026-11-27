@@ -23,7 +23,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - name: Run Rust unit tests
         run: cargo test --lib
-      - name: Build and install marxtreme
+      - name: Build and install marine-extremes
         run: |
           python -m pip install --upgrade pip maturin pytest
           maturin develop --release --extras io,dev

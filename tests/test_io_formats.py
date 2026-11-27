@@ -12,8 +12,8 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-import marxtreme as mx
-from marxtreme import CATEGORY_MISSING, DetrendedBaseline, DetectResult, EventCatalog, FixedBaseline, MovingBaseline
+import marine_extremes as mx
+from marine_extremes import CATEGORY_MISSING, DetrendedBaseline, DetectResult, EventCatalog, FixedBaseline, MovingBaseline
 
 MATLAB_BIN = Path("/usr/local/MATLAB/R2025b/bin/matlab")
 

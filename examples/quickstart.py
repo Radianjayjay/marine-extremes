@@ -1,4 +1,4 @@
-"""Minimal self-contained quickstart for marxtreme (no external data files required)."""
+"""Minimal self-contained quickstart for marine-extremes (no external data files required)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-import marxtreme as mx
+import marine_extremes as mx
 
 
 def make_demo_sst() -> xr.DataArray:

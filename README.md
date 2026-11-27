@@ -1,15 +1,15 @@
-# marxtreme
+# marine-extremes
 
-[![CI & Wheels](https://github.com/Radianjayjay/marxtreme/actions/workflows/ci.yml/badge.svg)](https://github.com/Radianjayjay/marxtreme/actions/workflows/ci.yml)
+[![CI & Wheels](https://github.com/Radianjayjay/marine-extremes/actions/workflows/ci.yml/badge.svg)](https://github.com/Radianjayjay/marine-extremes/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python >= 3.11](https://img.shields.io/badge/Python-%3E%3D3.11-3776AB.svg)](pyproject.toml)
 [![Rust Core](https://img.shields.io/badge/Core-Rust%20%2B%20Rayon-DEA584.svg)](Cargo.toml)
 
 **English** | [简体中文](README.zh-CN.md)
 
-`marxtreme` (*Marine Extremes*) is a Rust-accelerated Python package for detecting marine heatwaves (MHWs), marine cold spells (MCSs), and general scalar marine extremes such as salinity anomalies. It works on 1D station records, 3D surface grids (NOAA OISST, OSTIA), 4D depth-resolved ocean reanalyses (GLORYS, ORAS5, Argo), and multi-calendar CMIP6 simulations.
+`marine-extremes` is a Rust-accelerated Python package for detecting marine heatwaves (MHWs), marine cold spells (MCSs), and general scalar marine extremes such as salinity anomalies. It works on 1D station records, 3D surface grids (NOAA OISST, OSTIA), 4D depth-resolved ocean reanalyses (GLORYS, ORAS5, Argo), and multi-calendar CMIP6 simulations.
 
-An interactive architecture walkthrough is available in [docs/marxtreme_overview.html](docs/marxtreme_overview.html).
+An interactive architecture walkthrough is available in [docs/marine_extremes_overview.html](docs/marine_extremes_overview.html).
 
 ## What it does
 
@@ -28,8 +28,8 @@ An interactive architecture walkthrough is available in [docs/marxtreme_overview
 Building from source requires a Rust toolchain:
 
 ```bash
-git clone https://github.com/Radianjayjay/marxtreme.git
-cd marxtreme
+git clone https://github.com/Radianjayjay/marine-extremes.git
+cd marine-extremes
 
 # Build release extension with all optional I/O backends (NetCDF4, HDF5/MAT, Zarr, cftime, Dask)
 pip install maturin
@@ -38,16 +38,16 @@ maturin develop --release --extras io
 
 Optional dependency groups in [pyproject.toml](pyproject.toml):
 
-- `marxtreme[netcdf]`: `netCDF4`, `h5netcdf`, `cftime`, `dask`
-- `marxtreme[mat]`: `h5py`, `scipy` (MATLAB v7.3 and v5 `.mat`)
-- `marxtreme[zarr]`: `zarr>=3.0`, `cftime`, `dask`
-- `marxtreme[io]`: all of the above
-- `marxtreme[dev]`: `pytest`, `maturin`
+- `marine-extremes[netcdf]`: `netCDF4`, `h5netcdf`, `cftime`, `dask`
+- `marine-extremes[mat]`: `h5py`, `scipy` (MATLAB v7.3 and v5 `.mat`)
+- `marine-extremes[zarr]`: `zarr>=3.0`, `cftime`, `dask`
+- `marine-extremes[io]`: all of the above
+- `marine-extremes[dev]`: `pytest`, `maturin`
 
 ## Quick start
 
 ```python
-import marxtreme as mx
+import marine_extremes as mx
 
 res = mx.detect(
     "data/OISST_1982_2025_r360x180.nc",
@@ -89,9 +89,9 @@ python examples/quickstart.py
 
 ## Benchmarks and verification
 
-![marxtreme v0.1.0 speed, peak memory, and scalability](docs/figures/benchmark_perf_en.png)
+![marine-extremes v0.1.0 speed, peak memory, and scalability](docs/figures/benchmark_perf_en.png)
 
-![marxtreme v0.1.0 cross-tool numerical accuracy and event parity](docs/figures/benchmark_accuracy_en.png)
+![marine-extremes v0.1.0 cross-tool numerical accuracy and event parity](docs/figures/benchmark_accuracy_en.png)
 
 Measured on real NOAA OISST v2.1 daily SST (1982-2025, 16,071 daily steps, 1982-2011 baseline) on Linux (Intel Core i9-10920X, 12C/24T @ 3.5 GHz, 30 GiB RAM) using isolated subprocesses (`perf_counter` wall time and `/usr/bin/time -v` peak RSS). Peer versions: `heatwave3 1.5.0` (24 threads, `roundClm=False`), MATLAB R2025b `m_mhw1.0` (`detectc.m`), `mhw-detect 0.2.3` (Numba `0.68.1`), `ecjoliver/marineHeatWaves.py` (patched for NumPy 2), and `xmhw`.
 
@@ -99,7 +99,7 @@ With `heatwave3` and `xmhw`, 290-300 days of the year agree to `0.0 °C`; the `<
 
 ### Feature comparison
 
-| Capability | `marxtreme` | `heatwave3` | `m_mhw1.0` | `heatwaveR` | `marineHeatWaves` | `xmhw` | `mhw-detect` |
+| Capability | `marine-extremes` | `heatwave3` | `m_mhw1.0` | `heatwaveR` | `marineHeatWaves` | `xmhw` | `mhw-detect` |
 | --- | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | Core engine | Rust + Rayon | C++ + OpenMP | MATLAB | R + Rcpp | Python | xarray + Dask | Python + Numba |
 | Single-pass MHW + MCS | Yes | No (2 passes) | No (2 passes) | No (2 passes) | No (2 passes) | No (2 passes) | No |
@@ -148,10 +148,11 @@ Passing `out="path"` (or calling `res.save("path")`, `res.to_mat("path")`, or `r
 ## Project structure
 
 ```text
-marxtreme/
+marine-extremes/
 ├── Cargo.toml                        # Rust crate config (PyO3 0.30, rust-numpy 0.30, Rayon 1.12)
 ├── pyproject.toml                    # Python packaging & maturin build config
 ├── LICENSE                           # MIT License
+├── CITATION.cff                      # Citation metadata (GitHub & Zenodo)
 ├── README.md                         # English documentation (default)
 ├── README.zh-CN.md                   # Simplified Chinese documentation
 ├── src/                              # Rust parallel core
@@ -160,7 +161,7 @@ marxtreme/
 │   ├── quantile.rs                   # Type-7 & Type-5 (Hazen) quantiles
 │   ├── baseline.rs                   # OLS detrending, WindowPlan, MovingSchedule, circular smoothing
 │   └── detect.rs                     # Padding, threshold scan, transitive gap merge, metrics & categories
-├── python/marxtreme/                 # Python orchestration & persistence modules
+├── python/marine_extremes/           # Python orchestration & persistence modules
 │   ├── __init__.py                   # Public exports (detect, compute_climatology, open, baselines)
 │   ├── api.py                        # Public entry points (detect, compute_climatology)
 │   ├── baselines.py                  # Baseline specifications & PreparedBaseline adapters
@@ -175,13 +176,13 @@ marxtreme/
 ├── benchmarks/bench_global_scale.py  # Synthetic global-scale throughput benchmark
 ├── docs/
 │   ├── figures/                      # Bilingual README speed & accuracy figures
-│   └── marxtreme_overview.html       # Interactive illustrated HTML overview
+│   └── marine_extremes_overview.html # Interactive illustrated HTML overview
 └── .github/workflows/ci.yml          # Multi-Python CI & cross-platform wheel builds
 ```
 
 ## Scope
 
-`marxtreme` handles point-wise 1D-4D extreme event detection and single-target output. It does not perform 3D/4D spatial connected-component object tracking, vertical ocean heat content integration, or vertical subtype classification.
+`marine-extremes` handles point-wise 1D-4D extreme event detection and single-target output. It does not perform 3D/4D spatial connected-component object tracking, vertical ocean heat content integration, or vertical subtype classification.
 
 ## Development and testing
 
@@ -203,7 +204,7 @@ python benchmarks/bench_global_scale.py
 
 Small numerical differences between MHW/MCS tools (MATLAB `m_mhw1.0`, Python `marineHeatWaves` / `xmhw`, R `heatwaveR`, C++ `heatwave3`) come from different conventions for quantile interpolation (Type-5 Hazen vs. Type-7), threshold inequality (`>=` vs. `>`), Feb 29 handling, intensity variance `ddof` (`0` vs. `1`), and year-boundary window wrapping. To match a specific reference implementation, pass `compat="m_mhw"`, `"oliver"`, `"heatwaveR"`, or `"standard"` (see [Cross-tool compatibility profiles](#cross-tool-compatibility-profiles) and [Benchmarks and verification](#benchmarks-and-verification)).
 
-If you hit a bug, a calendar edge case, or an I/O issue, open a report on [GitHub Issues](https://github.com/Radianjayjay/marxtreme/issues) with your `marxtreme` version, Python and OS details, and a minimal reproducer.
+If you hit a bug, a calendar edge case, or an I/O issue, open a report on [GitHub Issues](https://github.com/Radianjayjay/marine-extremes/issues) with your `marine-extremes` version, Python and OS details, and a minimal reproducer.
 
 ## Contributing
 
@@ -217,19 +218,19 @@ Bug fixes, calendar or I/O adapters, parity tests, and documentation edits are w
    pytest -v
    ```
 3. Add unit or regression tests under `tests/` for behavioral changes or bug fixes.
-4. Open a pull request or start a discussion on [GitHub Issues](https://github.com/Radianjayjay/marxtreme/issues).
+4. Open a pull request or start a discussion on [GitHub Issues](https://github.com/Radianjayjay/marine-extremes/issues).
 
 ## Citation
 
-If you use `marxtreme` in research or operational work, cite the package alongside the underlying methodology papers (for example Hobday et al., 2016; Hobday et al., 2018; Schlegel et al., 2021):
+If you use `marine-extremes` in research or operational work, cite the package alongside the underlying methodology papers (for example Hobday et al., 2016; Hobday et al., 2018; Schlegel et al., 2021):
 
 ```bibtex
-@software{marxtreme,
-  author  = {Radianjayjay and marxtreme contributors},
-  title   = {marxtreme: Rust-Accelerated Marine Heatwave, Cold Spell, and Marine Extreme Detection},
+@software{marine_extremes,
+  author  = {Ren, Jie},
+  title   = {marine-extremes: Rust-Accelerated Marine Heatwave, Cold Spell, and Marine Extreme Detection},
   version = {0.1.0},
   year    = {2026},
-  url     = {https://github.com/Radianjayjay/marxtreme}
+  url     = {https://github.com/Radianjayjay/marine-extremes}
 }
 ```
 

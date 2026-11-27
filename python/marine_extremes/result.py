@@ -9,12 +9,12 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
-from marxtreme.catalog import EventCatalog
+from marine_extremes.catalog import EventCatalog
 
 
 @dataclass
 class DetectResult:
-    """Unified output container for ``marxtreme.detect()``."""
+    """Unified output container for ``marine_extremes.detect()``."""
 
     events: EventCatalog | None
     clim: xr.DataArray | None = None
@@ -94,16 +94,16 @@ class DetectResult:
         """Save this result as ONE single self-contained file.
 
         Note: When overwriting ``self.out_path`` in place, lazy disk handles on ``self`` are
-        closed prior to atomic replacement; reopen with ``marxtreme.open(path)`` to read
+        closed prior to atomic replacement; reopen with ``marine_extremes.open(path)`` to read
         the updated file.
         """
-        from marxtreme.io_formats import (
+        from marine_extremes.io_formats import (
             TABULAR_ONLY_FORMATS,
             OutputSpec,
             open_file_writer,
             resolve_out_format,
         )
-        from marxtreme.streaming import estimate_max_tile_pixels, iter_spatial_tiles, parse_memory_limit
+        from marine_extremes.streaming import estimate_max_tile_pixels, iter_spatial_tiles, parse_memory_limit
 
         out_file = Path(path)
         fmt = resolve_out_format(out_file, out_format=out_format, mat_layout=mat_layout)
@@ -162,8 +162,8 @@ class DetectResult:
 
     @classmethod
     def open(cls, path: str | Path, events_in_memory: bool = False) -> "DetectResult":
-        """Reopen any self-contained ``marxtreme`` output."""
-        from marxtreme.io_formats import TREND_VAR_KEYS, open_single_file
+        """Reopen any self-contained ``marine-extremes`` output."""
+        from marine_extremes.io_formats import TREND_VAR_KEYS, open_single_file
 
         p = Path(path)
         ds, events, metadata, closers = open_single_file(p, events_in_memory=events_in_memory)

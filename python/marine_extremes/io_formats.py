@@ -23,8 +23,8 @@ import pyarrow.ipc as pa_ipc
 import pyarrow.parquet as pq
 import xarray as xr
 
-from marxtreme import _core
-from marxtreme.calendar import (
+from marine_extremes import _core
+from marine_extremes.calendar import (
     CF_TIME_UNITS,
     CalendarInfo,
     cf_days_to_time,
@@ -34,7 +34,7 @@ from marxtreme.calendar import (
     time_to_cf_days,
     yyyymmdd_to_dates,
 )
-from marxtreme.catalog import (
+from marine_extremes.catalog import (
     CSV_STANDARD_DTYPES,
     DATE_EVENT_COLS,
     DiskEventStore,
@@ -48,8 +48,8 @@ from marxtreme.catalog import (
     is_str_dtype,
     to_str_list,
 )
-from marxtreme.result import DetectResult
-from marxtreme.streaming import SpatialTile
+from marine_extremes.result import DetectResult
+from marine_extremes.streaming import SpatialTile
 
 CATEGORY_MISSING: int = int(_core.CATEGORY_MISSING)
 
@@ -467,16 +467,16 @@ def _encode_event_col_numpy(
 
 def _common_meta_attrs(spec: OutputSpec, fmt: OutFormat, *, include_coords: bool = True) -> dict[str, Any]:
     out: dict[str, Any] = {
-        "marxtreme_format": fmt,
-        "marxtreme_metadata_json": json.dumps(spec.attrs, default=str),
-        "marxtreme_spatial_dims": json.dumps(list(spec.spatial_dims)),
-        "marxtreme_spatial_shape": json.dumps(list(spec.spatial_shape)),
-        "marxtreme_time_dim": spec.time_dim,
-        "marxtreme_year_len": int(spec.year_len),
-        "marxtreme_has_moving_years": bool(spec.moving_years is not None),
+        "marine_extremes_format": fmt,
+        "marine_extremes_metadata_json": json.dumps(spec.attrs, default=str),
+        "marine_extremes_spatial_dims": json.dumps(list(spec.spatial_dims)),
+        "marine_extremes_spatial_shape": json.dumps(list(spec.spatial_shape)),
+        "marine_extremes_time_dim": spec.time_dim,
+        "marine_extremes_year_len": int(spec.year_len),
+        "marine_extremes_has_moving_years": bool(spec.moving_years is not None),
     }
     if include_coords:
-        out["marxtreme_spatial_coords_json"] = json.dumps(_serialize_spatial_coords(spec.spatial_coords))
+        out["marine_extremes_spatial_coords_json"] = json.dumps(_serialize_spatial_coords(spec.spatial_coords))
     return out
 
 
@@ -535,14 +535,14 @@ def resolve_out_format(
 
 
 def detect_file_format(path: Path) -> OutFormat:
-    """Detect format of an existing marxtreme output using magic bytes, Zarr markers, or extension."""
+    """Detect format of an existing marine-extremes output using magic bytes, Zarr markers, or extension."""
     if not path.exists():
         raise FileNotFoundError(f"Output path does not exist: {path}")
     if path.is_dir():
         if (path / "zarr.json").exists() or (path / ".zgroup").exists():
             return "zarr"
         raise IsADirectoryError(
-            f"Expected a marxtreme output file or .zarr store, got plain directory '{path}'."
+            f"Expected a marine-extremes output file or .zarr store, got plain directory '{path}'."
         )
     with open(path, "rb") as fh:
         head = fh.read(16)
@@ -560,7 +560,7 @@ def detect_file_format(path: Path) -> OutFormat:
     suffix = path.suffix.lower()
     if suffix in _EXT_TO_FORMAT:
         return _EXT_TO_FORMAT[suffix]
-    raise ValueError(f"Unable to detect marxtreme file format for '{path}'.")
+    raise ValueError(f"Unable to detect marine-extremes file format for '{path}'.")
 
 
 # ============================================================================
@@ -849,7 +849,7 @@ class _NetCDFAdapter:
         import netCDF4 as nc4
 
         with nc4.Dataset(str(path), "r") as ds:
-            meta_json = getattr(ds, "marxtreme_metadata_json", "{}")
+            meta_json = getattr(ds, "marine_extremes_metadata_json", "{}")
             meta = json.loads(meta_json) if meta_json else {}
             cal = calendar if calendar is not None else meta.get("calendar")
             dres = date_resolution if date_resolution is not None else meta.get("date_resolution")
@@ -859,12 +859,12 @@ class _NetCDFAdapter:
         import netCDF4 as nc4
 
         with nc4.Dataset(str(path), "r") as nc:
-            meta_json = getattr(nc, "marxtreme_metadata_json", "{}")
+            meta_json = getattr(nc, "marine_extremes_metadata_json", "{}")
             metadata = json.loads(meta_json) if meta_json else {}
             cal = metadata.get("calendar")
             dres = metadata.get("date_resolution")
-            spatial_dims = tuple(json.loads(getattr(nc, "marxtreme_spatial_dims", "[]")))
-            spatial_shape = tuple(json.loads(getattr(nc, "marxtreme_spatial_shape", "[]")))
+            spatial_dims = tuple(json.loads(getattr(nc, "marine_extremes_spatial_dims", "[]")))
+            spatial_shape = tuple(json.loads(getattr(nc, "marine_extremes_spatial_shape", "[]")))
             spatial_coords = {
                 d: (np.asarray(nc.variables[d][:]) if d in nc.variables else np.arange(n))
                 for d, n in zip(spatial_dims, spatial_shape)
@@ -902,7 +902,7 @@ class _NetCDFAdapter:
 
 def _write_mat_v73_header(path: Path) -> None:
     """Overwrite the 512-byte HDF5 userblock prefix with a valid 128-byte MATLAB v7.3 header."""
-    desc = b"MATLAB 7.3 MAT-file, Platform: GLNXA64, Created by marxtreme"
+    desc = b"MATLAB 7.3 MAT-file, Platform: GLNXA64, Created by marine-extremes"
     header = desc.ljust(116, b" ") + (b"\x00" * 8) + struct.pack("<H", 0x0200) + b"IM"
     assert len(header) == 128
     with open(path, "r+b") as fh:
@@ -1083,9 +1083,9 @@ class _MatV73Writer:
                 if is_str_dtype(np.asarray(spec.spatial_coords[d]).dtype)
             }
             if str_coords:
-                f.attrs["marxtreme_spatial_coords_json"] = json.dumps(_serialize_spatial_coords(str_coords))
-            f.attrs["marxtreme_time_units"] = t_units
-            f.attrs["marxtreme_time_calendar"] = t_cal
+                f.attrs["marine_extremes_spatial_coords_json"] = json.dumps(_serialize_spatial_coords(str_coords))
+            f.attrs["marine_extremes_time_units"] = t_units
+            f.attrs["marine_extremes_time_calendar"] = t_cal
         except BaseException:
             self.close()
             raise
@@ -1231,10 +1231,10 @@ class _MatV73Adapter:
         import h5py
 
         with h5py.File(str(path), "r") as f:
-            meta = json.loads(f.attrs["marxtreme_metadata_json"]) if "marxtreme_metadata_json" in f.attrs else {}
+            meta = json.loads(f.attrs["marine_extremes_metadata_json"]) if "marine_extremes_metadata_json" in f.attrs else {}
             cal = calendar if calendar is not None else (
                 meta.get("calendar")
-                or (str(f.attrs["marxtreme_time_calendar"]) if "marxtreme_time_calendar" in f.attrs else None)
+                or (str(f.attrs["marine_extremes_time_calendar"]) if "marine_extremes_time_calendar" in f.attrs else None)
             )
             dres = date_resolution if date_resolution is not None else meta.get("date_resolution")
             return _read_mat_v73_events_group(f["events"], start=start, stop=stop, calendar=cal, date_resolution=dres)
@@ -1245,16 +1245,16 @@ class _MatV73Adapter:
 
         f = h5py.File(str(path), "r")
         try:
-            metadata = json.loads(f.attrs["marxtreme_metadata_json"]) if "marxtreme_metadata_json" in f.attrs else {}
+            metadata = json.loads(f.attrs["marine_extremes_metadata_json"]) if "marine_extremes_metadata_json" in f.attrs else {}
             cal = metadata.get("calendar") or (
-                str(f.attrs["marxtreme_time_calendar"]) if "marxtreme_time_calendar" in f.attrs else None
+                str(f.attrs["marine_extremes_time_calendar"]) if "marine_extremes_time_calendar" in f.attrs else None
             )
             dres = metadata.get("date_resolution")
-            spatial_dims = tuple(json.loads(f.attrs["marxtreme_spatial_dims"])) if "marxtreme_spatial_dims" in f.attrs else ()
-            spatial_shape = tuple(json.loads(f.attrs["marxtreme_spatial_shape"])) if "marxtreme_spatial_shape" in f.attrs else ()
+            spatial_dims = tuple(json.loads(f.attrs["marine_extremes_spatial_dims"])) if "marine_extremes_spatial_dims" in f.attrs else ()
+            spatial_shape = tuple(json.loads(f.attrs["marine_extremes_spatial_shape"])) if "marine_extremes_spatial_shape" in f.attrs else ()
             saved_coords = (
-                _deserialize_spatial_coords(json.loads(f.attrs["marxtreme_spatial_coords_json"]))
-                if "marxtreme_spatial_coords_json" in f.attrs
+                _deserialize_spatial_coords(json.loads(f.attrs["marine_extremes_spatial_coords_json"]))
+                if "marine_extremes_spatial_coords_json" in f.attrs
                 else {}
             )
             spatial_coords = {
@@ -1283,21 +1283,21 @@ class _MatV73Adapter:
 
             grids_ds = None
             if any(g in f for g in ALL_GRID_VAR_NAMES):
-                time_dim = str(f.attrs["marxtreme_time_dim"])
-                has_mov = bool(f.attrs["marxtreme_has_moving_years"])
+                time_dim = str(f.attrs["marine_extremes_time_dim"])
+                has_mov = bool(f.attrs["marine_extremes_has_moving_years"])
                 coords: dict[str, Any] = dict(spatial_coords)
                 if "doy" in f:
                     coords["doy"] = f["doy"][:].reshape(-1)
                 if time_dim in f:
                     coords[time_dim] = cf_days_to_time(
                         f[time_dim][:],
-                        str(f.attrs.get("marxtreme_time_units", CF_TIME_UNITS)),
-                        str(f.attrs.get("marxtreme_time_calendar", "proleptic_gregorian")),
+                        str(f.attrs.get("marine_extremes_time_units", CF_TIME_UNITS)),
+                        str(f.attrs.get("marine_extremes_time_calendar", "proleptic_gregorian")),
                     )
                 elif f"{time_dim}_yyyymmdd" in f:
                     coords[time_dim] = yyyymmdd_to_dates(
                         f[f"{time_dim}_yyyymmdd"][:].reshape(-1),
-                        calendar=str(f.attrs.get("marxtreme_time_calendar", "proleptic_gregorian")),
+                        calendar=str(f.attrs.get("marine_extremes_time_calendar", "proleptic_gregorian")),
                     )
                 if has_mov and "year" in f:
                     coords["year"] = f["year"][:].reshape(-1)
@@ -1493,7 +1493,7 @@ class _ZarrAdapter:
         import zarr
 
         root = zarr.open_group(str(path), mode="r")
-        meta_json = root.attrs.get("marxtreme_metadata_json", "{}")
+        meta_json = root.attrs.get("marine_extremes_metadata_json", "{}")
         meta = json.loads(meta_json) if meta_json else {}
         cal = calendar if calendar is not None else meta.get("calendar")
         dres = date_resolution if date_resolution is not None else meta.get("date_resolution")
@@ -1503,15 +1503,15 @@ class _ZarrAdapter:
         import zarr
 
         root = zarr.open_group(str(path), mode="r")
-        meta_json = root.attrs.get("marxtreme_metadata_json", "{}")
+        meta_json = root.attrs.get("marine_extremes_metadata_json", "{}")
         metadata = json.loads(meta_json) if meta_json else {}
         cal = metadata.get("calendar")
         dres = metadata.get("date_resolution")
-        spatial_dims = tuple(json.loads(root.attrs.get("marxtreme_spatial_dims", "[]")))
-        spatial_shape = tuple(json.loads(root.attrs.get("marxtreme_spatial_shape", "[]")))
+        spatial_dims = tuple(json.loads(root.attrs.get("marine_extremes_spatial_dims", "[]")))
+        spatial_shape = tuple(json.loads(root.attrs.get("marine_extremes_spatial_shape", "[]")))
         saved_coords = (
-            _deserialize_spatial_coords(json.loads(root.attrs["marxtreme_spatial_coords_json"]))
-            if "marxtreme_spatial_coords_json" in root.attrs
+            _deserialize_spatial_coords(json.loads(root.attrs["marine_extremes_spatial_coords_json"]))
+            if "marine_extremes_spatial_coords_json" in root.attrs
             else {}
         )
         spatial_coords = {
@@ -1709,7 +1709,7 @@ class _MatDetectcWriter(_BufferedGridWriter):
             "has_events": bool(spec.write_events and grid_offsets is not None),
             "metadata": spec.attrs,
         }
-        payload["marxtreme_meta_json"] = json.dumps(meta_blob, default=str)
+        payload["marine_extremes_meta_json"] = json.dumps(meta_blob, default=str)
 
         tmp_path = _staging_path(self.path, self)
         try:
@@ -1730,7 +1730,7 @@ class _MatDetectcAdapter:
         import scipy.io as sio
 
         mat = sio.loadmat(str(path), squeeze_me=False)
-        raw_mj = mat.get("marxtreme_meta_json")
+        raw_mj = mat.get("marine_extremes_meta_json")
         blob = (
             json.loads(str(raw_mj.item()) if isinstance(raw_mj, np.ndarray) else str(raw_mj))
             if raw_mj is not None
@@ -1842,7 +1842,7 @@ class _NpzWriter(_BufferedGridWriter):
             "event_columns": event_cols_order,
             "metadata": spec.attrs,
         }
-        payload["marxtreme_meta_json"] = np.frombuffer(json.dumps(meta_blob, default=str).encode("utf-8"), dtype=np.uint8)
+        payload["marine_extremes_meta_json"] = np.frombuffer(json.dumps(meta_blob, default=str).encode("utf-8"), dtype=np.uint8)
 
         tmp_path = _staging_path(self.path, self)
         try:
@@ -1861,7 +1861,7 @@ class _NpzAdapter:
 
     def open(self, path: Path, *, events_in_memory: bool) -> tuple[xr.Dataset | None, EventCatalog | None, dict[str, Any], list[Any]]:
         with np.load(path, allow_pickle=False) as npz:
-            blob = json.loads(bytes(npz["marxtreme_meta_json"].tobytes()).decode("utf-8"))
+            blob = json.loads(bytes(npz["marine_extremes_meta_json"].tobytes()).decode("utf-8"))
             metadata = blob.get("metadata", {})
             cal = metadata.get("calendar") or blob.get("time_calendar")
             dres = metadata.get("date_resolution")
@@ -1941,7 +1941,7 @@ class _TabularWriter:
 
     def _attach_schema_meta(self, tbl: pa.Table) -> pa.Table:
         existing = dict(tbl.schema.metadata or {})
-        existing[b"marxtreme_meta"] = json.dumps(self._base_meta, default=str).encode("utf-8")
+        existing[b"marine_extremes_meta"] = json.dumps(self._base_meta, default=str).encode("utf-8")
         return tbl.replace_schema_metadata(existing)
 
     def write_grid_tile(self, name: str, tile: SpatialTile, data: np.ndarray, extra_ndims: int) -> None:
@@ -1983,7 +1983,7 @@ class _TabularWriter:
                 t_empty = self._attach_schema_meta(schema.empty_table())
                 self._writer = pq.ParquetWriter(self._tmp_path, t_empty.schema, compression="zstd")
             if grid_offsets is not None:
-                self._writer.add_key_value_metadata({b"marxtreme_csr": _encode_csr_counts(grid_offsets).encode("ascii")})
+                self._writer.add_key_value_metadata({b"marine_extremes_csr": _encode_csr_counts(grid_offsets).encode("ascii")})
             self._writer.close()
             self._writer = None
         else:
@@ -2045,7 +2045,7 @@ class _ParquetAdapter:
         pf = pq.ParquetFile(path)
         schema_meta = pf.schema_arrow.metadata or {}
         file_meta = pf.metadata.metadata or {}
-        blob = json.loads(schema_meta[b"marxtreme_meta"].decode("utf-8")) if b"marxtreme_meta" in schema_meta else {}
+        blob = json.loads(schema_meta[b"marine_extremes_meta"].decode("utf-8")) if b"marine_extremes_meta" in schema_meta else {}
         metadata = blob.get("metadata", {})
         cal, dres = metadata.get("calendar"), metadata.get("date_resolution")
         spatial_dims = tuple(blob.get("spatial_dims", []))
@@ -2054,9 +2054,9 @@ class _ParquetAdapter:
         n_pixels = int(math.prod(spatial_shape)) if spatial_shape else 1
 
         grid_offsets: np.ndarray | None = None
-        if b"marxtreme_csr" in file_meta:
+        if b"marine_extremes_csr" in file_meta:
             try:
-                cand = _decode_csr_counts(file_meta[b"marxtreme_csr"].decode("ascii"), max_bytes=(n_pixels + 1) * 16)
+                cand = _decode_csr_counts(file_meta[b"marine_extremes_csr"].decode("ascii"), max_bytes=(n_pixels + 1) * 16)
                 if (
                     cand.size == n_pixels + 1
                     and cand[0] == 0
@@ -2091,7 +2091,7 @@ class _FeatherAdapter:
     def open(self, path: Path, *, events_in_memory: bool) -> tuple[xr.Dataset | None, EventCatalog | None, dict[str, Any], list[Any]]:
         tbl = pa_feather.read_table(path)
         schema_meta = tbl.schema.metadata or {}
-        blob = json.loads(schema_meta[b"marxtreme_meta"].decode("utf-8")) if b"marxtreme_meta" in schema_meta else {}
+        blob = json.loads(schema_meta[b"marine_extremes_meta"].decode("utf-8")) if b"marine_extremes_meta" in schema_meta else {}
         metadata = blob.get("metadata", {})
         cal, dres = metadata.get("calendar"), metadata.get("date_resolution")
         spatial_dims = tuple(blob.get("spatial_dims", []))
@@ -2209,7 +2209,7 @@ def open_single_file(
     *,
     events_in_memory: bool = False,
 ) -> tuple[xr.Dataset | None, EventCatalog | None, dict[str, Any], list[Any]]:
-    """Open any single-file ``marxtreme`` output into ``(grids_ds, EventCatalog | None, metadata, closers)``."""
+    """Open any single-file ``marine-extremes`` output into ``(grids_ds, EventCatalog | None, metadata, closers)``."""
     p = Path(path)
     fmt = detect_file_format(p)
     return _FORMAT_ADAPTERS[fmt].open(p, events_in_memory=events_in_memory)

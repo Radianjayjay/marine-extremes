@@ -10,10 +10,10 @@ from typing import Any, Literal, Sequence
 import numpy as np
 import xarray as xr
 
-from marxtreme import _core
-from marxtreme.calendar import CalendarInfo, build_period_mask, effective_feb29_mode, encode_time_axis
-from marxtreme.compat import CompatProfile
-from marxtreme.streaming import (
+from marine_extremes import _core
+from marine_extremes.calendar import CalendarInfo, build_period_mask, effective_feb29_mode, encode_time_axis
+from marine_extremes.compat import CompatProfile
+from marine_extremes.streaming import (
     OpenedInput,
     SpatialTile,
     estimate_max_tile_pixels,

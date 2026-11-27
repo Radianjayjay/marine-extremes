@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-import marxtreme as mx
+import marine_extremes as mx
 
 
 def test_all_nan_pure_land_in_memory_and_streaming(tmp_path: Path):

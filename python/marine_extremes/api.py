@@ -1,4 +1,4 @@
-"""High-level public API for ``marxtreme``: ``compute_climatology`` and ``detect``."""
+"""High-level public API for ``marine-extremes``: ``compute_climatology`` and ``detect``."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from typing import Any, Literal, Sequence
 import numpy as np
 import xarray as xr
 
-from marxtreme import _core
-from marxtreme.baselines import (
+from marine_extremes import _core
+from marine_extremes.baselines import (
     BaselineSpec,
     ExternalClimatology,
     FixedBaseline,
@@ -21,9 +21,9 @@ from marxtreme.baselines import (
     prepare_baseline,
     run_climatology_only,
 )
-from marxtreme.calendar import datetime64_resolution, effective_feb29_mode, encode_time_axis
-from marxtreme.compat import CompatProfile, resolve_compat
-from marxtreme.io_formats import (
+from marine_extremes.calendar import datetime64_resolution, effective_feb29_mode, encode_time_axis
+from marine_extremes.compat import CompatProfile, resolve_compat
+from marine_extremes.io_formats import (
     GRID_CAPABLE_FORMATS,
     MatLayout,
     OutFormat,
@@ -31,8 +31,8 @@ from marxtreme.io_formats import (
     create_result_sink,
     resolve_out_format,
 )
-from marxtreme.result import DetectResult
-from marxtreme.streaming import (
+from marine_extremes.result import DetectResult
+from marine_extremes.streaming import (
     estimate_max_tile_pixels,
     iter_spatial_tiles,
     open_data_input,

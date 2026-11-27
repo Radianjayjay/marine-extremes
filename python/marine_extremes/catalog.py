@@ -10,7 +10,7 @@ import pandas as pd
 import pyarrow as pa
 import xarray as xr
 
-from marxtreme.calendar import CalendarInfo, format_date_column, yyyymmdd_to_dates
+from marine_extremes.calendar import CalendarInfo, format_date_column, yyyymmdd_to_dates
 
 # ---------------------------------------------------------------------------
 # Single authoritative event schema & column codecs
@@ -508,7 +508,7 @@ class EventCatalog:
         mat_layout: str = "v73",
     ) -> Path:
         """Save this event catalog as ONE single self-contained file."""
-        from marxtreme.io_formats import OutputSpec, open_file_writer, resolve_out_format
+        from marine_extremes.io_formats import OutputSpec, open_file_writer, resolve_out_format
 
         out_path = Path(path)
         out_fmt = resolve_out_format(out_path, out_format=fmt, mat_layout=mat_layout)
@@ -542,7 +542,7 @@ class EventCatalog:
     @classmethod
     def open(cls, path: str | Path, in_memory: bool = False) -> "EventCatalog":
         """Open a single-file EventCatalog (``.parquet``, ``.feather``, ``.csv``, ``.nc``, ``.mat``, ``.zarr``, ``.npz``)."""
-        from marxtreme.io_formats import open_single_file
+        from marine_extremes.io_formats import open_single_file
 
         _, catalog, _, closers = open_single_file(path, events_in_memory=in_memory)
         try:

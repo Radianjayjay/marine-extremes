@@ -11,10 +11,10 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-import marxtreme as mx
-from marxtreme import _core
-from marxtreme.calendar import date_to_ymd_key, dates_to_yyyymmdd
-from marxtreme.io_formats import OutputSpec, _compute_bounded_chunks, open_file_writer
+import marine_extremes as mx
+from marine_extremes import _core
+from marine_extremes.calendar import date_to_ymd_key, dates_to_yyyymmdd
+from marine_extremes.io_formats import OutputSpec, _compute_bounded_chunks, open_file_writer
 
 
 def _make_grid_da(
@@ -395,7 +395,7 @@ def test_b8_zero_events_string_coords_and_detectc_to_feather(tmp_path: Path):
 def test_b9_npz_forbids_pickle_and_roundtrips_strings(tmp_path: Path):
     # Craft an NPZ containing a pickled object array
     evil_p = tmp_path / "evil.npz"
-    np.savez(evil_p, marxtreme_meta_json=np.array([{"evil": 1}], dtype=object))
+    np.savez(evil_p, marine_extremes_meta_json=np.array([{"evil": 1}], dtype=object))
     with pytest.raises(ValueError, match="Object arrays cannot be loaded when allow_pickle=False"):
         mx.open(evil_p)
 
@@ -776,7 +776,7 @@ def test_r2_validations_5digit_year_julian_monthly_clim_active_and_parquet_csr(t
     c_ext = mx.compute_climatology(da, baseline=mx.FixedBaseline("2000-01-01", "2002-12-31", clim_data=da_alt))
     assert float(c_ext["seas"].mean().values) > 25.0
 
-    # Parquet filtered externally with stale marxtreme_csr falls back safely to pixel_idx
+    # Parquet filtered externally with stale marine_extremes_csr falls back safely to pixel_idx
     import pyarrow.parquet as pq
 
     pq_orig = tmp_path / "orig.parquet"
@@ -868,7 +868,7 @@ def test_arch_fused_detrend_f32_multitile_and_eager_year_doy_and_disk_chunk_save
 def test_r4_post_refactor_review_regressions(tmp_path: Path):
     import cftime
 
-    from marxtreme.calendar import cf_days_to_time
+    from marine_extremes.calendar import cf_days_to_time
 
     # B1: FixedPlan det_doys=None with invalid det_slice raises ValueError (never PanicException)
     years = np.full(10, 2000, dtype=np.int32)

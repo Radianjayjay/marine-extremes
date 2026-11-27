@@ -7,7 +7,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-import marxtreme as mx
+import marine_extremes as mx
 
 
 def _synthetic_grid(

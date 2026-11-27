@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>marxtreme 项目全景介绍</title>
+<title>marine-extremes 项目全景介绍</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; }
   html, body {
@@ -326,7 +326,7 @@
   <!-- 1. Hero Strip -->
   <div class="hero">
     <div class="hero-left">
-      <span class="brand">marxtreme</span>
+      <span class="brand">marine-extremes</span>
       <span class="badge">Python + Rust (PyO3 / Rayon)</span>
       <span class="badge">Single-File I/O</span>
       <span class="badge">MHW · MCS · 任意标量</span>
@@ -366,7 +366,7 @@
       <div class="sec-title"><span class="dot"></span>系统架构与端到端数据流</div>
       <span class="sec-note">Python 编排 + PyO3 无 GIL 边界 + Rust Rayon 并行核</span>
     </div>
-    <svg class="diagram" viewBox="0 0 700 268" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="marxtreme 架构图">
+    <svg class="diagram" viewBox="0 0 700 268" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="marine-extremes 架构图">
       <defs>
         <marker id="arr" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
           <path d="M 1 1.5 L 8.5 5 L 1 8.5 z" fill="var(--muted-foreground, #94a3b8)" />
@@ -754,12 +754,12 @@
         <div class="bench-sub">全球 1° OISST（42,602 海洋格点）耗时对比（越短越快）</div>
         <svg class="diagram" viewBox="0 0 330 162" height="162" xmlns="http://www.w3.org/2000/svg">
           <!-- Bar 1 -->
-          <text x="0" y="16" font-size="10.2" font-weight="600" fill="var(--foreground, #e6edf3)">marxtreme (仅 MHW)</text>
+          <text x="0" y="16" font-size="10.2" font-weight="600" fill="var(--foreground, #e6edf3)">marine-extremes (仅 MHW)</text>
           <rect x="0" y="21" width="49" height="14" rx="4" fill="var(--chart-2, #34d399)" />
           <text x="55" y="32" font-size="10" font-family="var(--font-mono, monospace)" font-weight="700" fill="var(--chart-2, #34d399)">29.8s · 7.3 GB</text>
 
           <!-- Bar 2 -->
-          <text x="0" y="54" font-size="10.2" font-weight="600" fill="var(--foreground, #e6edf3)">marxtreme (单遍 MHW+MCS)</text>
+          <text x="0" y="54" font-size="10.2" font-weight="600" fill="var(--foreground, #e6edf3)">marine-extremes (单遍 MHW+MCS)</text>
           <rect x="0" y="59" width="54" height="14" rx="4" fill="var(--chart-1, #38bdf8)" />
           <text x="60" y="70" font-size="10" font-family="var(--font-mono, monospace)" font-weight="700" fill="var(--chart-1, #38bdf8)">33.0s · 7.7 GB</text>
 
@@ -779,8 +779,8 @@
       <div>
         <div class="bench-sub">塔斯曼海（619 海洋格点 × 44 年）跨工具耗时（对数示意）</div>
         <svg class="diagram" viewBox="0 0 330 162" height="162" xmlns="http://www.w3.org/2000/svg">
-          <!-- Bar 1: marxtreme 1.81s -->
-          <text x="0" y="15" font-size="10.2" font-weight="600" fill="var(--foreground, #e6edf3)">marxtreme (compat="m_mhw")</text>
+          <!-- Bar 1: marine-extremes 1.81s -->
+          <text x="0" y="15" font-size="10.2" font-weight="600" fill="var(--foreground, #e6edf3)">marine-extremes (compat="m_mhw")</text>
           <rect x="0" y="20" width="24" height="11" rx="3" fill="var(--chart-2, #34d399)" />
           <text x="30" y="29.5" font-size="9.8" font-family="var(--font-mono, monospace)" font-weight="700" fill="var(--chart-2, #34d399)">1.81s (70,852/70,852 零差)</text>
 
@@ -816,7 +816,7 @@
     </div>
     <div class="code-wrap">
       <button class="copy-btn" id="copy-btn" type="button">复制</button>
-      <pre class="code" id="code-sample">import marxtreme as mx
+      <pre class="code" id="code-sample">import marine_extremes as mx
 
 res = mx.detect(
     "OISST_1982_2025_r360x180.nc", var="sst", squeeze_singleton="zlev",

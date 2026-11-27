@@ -9,7 +9,7 @@ import pandas as pd
 import pytest
 import xarray as xr
 
-import marxtreme as mx
+import marine_extremes as mx
 
 
 def test_max_pad_length_only_applies_to_detection_not_climatology():
