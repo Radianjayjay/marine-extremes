@@ -8,6 +8,7 @@ authors:
     email: "renjie22@mails.ucas.ac.cn"
     affiliation: "South China Sea Institute of Oceanology, Chinese Academy of Sciences; University of Chinese Academy of Sciences"
     orcid: "https://orcid.org/0009-0000-2806-6771"
+    website: "https://www.researchgate.net/profile/Jie-Ren-126"
 repository-code: "https://github.com/Radianjayjay/marine-extremes"
 url: "https://github.com/Radianjayjay/marine-extremes"
 doi: "10.5281/zenodo.24579203"
@@ -34,5 +35,9 @@ keywords:
 license: MIT
 version: "0.1.0"
 contact:
-  - email: "renjie22@mails.ucas.ac.cn"
-    name: "Jie Ren"
+  - family-names: "Ren"
+    given-names: "Jie"
+    email: "renjie22@mails.ucas.ac.cn"
+    affiliation: "South China Sea Institute of Oceanology, Chinese Academy of Sciences; University of Chinese Academy of Sciences"
+    orcid: "https://orcid.org/0009-0000-2806-6771"
+    website: "https://www.researchgate.net/profile/Jie-Ren-126"

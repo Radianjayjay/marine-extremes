@@ -48,6 +48,9 @@ Homepage = "https://github.com/Radianjayjay/marine-extremes"
 Repository = "https://github.com/Radianjayjay/marine-extremes"
 Issues = "https://github.com/Radianjayjay/marine-extremes/issues"
 Changelog = "https://github.com/Radianjayjay/marine-extremes/blob/main/CHANGELOG.md"
+DOI = "https://doi.org/10.5281/zenodo.24579203"
+ORCID = "https://orcid.org/0009-0000-2806-6771"
+ResearchGate = "https://www.researchgate.net/profile/Jie-Ren-126"
 
 [project.optional-dependencies]
 netcdf = ["netCDF4>=1.6", "h5netcdf>=1.3", "cftime>=1.6", "dask>=2023.6"]

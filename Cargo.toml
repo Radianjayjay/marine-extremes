@@ -2,6 +2,7 @@
 name = "marine-extremes"
 version = "0.1.0"
 edition = "2021"
+authors = ["Jie Ren <renjie22@mails.ucas.ac.cn>"]
 license = "MIT"
 repository = "https://github.com/Radianjayjay/marine-extremes"
 description = "Rust-accelerated core for marine heatwave, marine cold spell, and general marine extreme event detection."

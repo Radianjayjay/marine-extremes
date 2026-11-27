@@ -257,6 +257,14 @@ If you use `marine-extremes` in research or operational work, cite the package a
 - Schlegel, R. W., Darmaraki, S., Benthuysen, J. A., Filbee-Dexter, K., & Oliver, E. C. J. (2021). Marine cold-spells. *Progress in Oceanography*, 198, 102684.
 - Reynolds, R. W., Smith, T. M., Liu, C., Chelton, D. B., Casey, K. S., & Schlax, M. G. (2007). Daily high-resolution-blended analyses for sea surface temperature. *Journal of Climate*, 20(22), 5473-5496.
 
+## Author
+
+Jie Ren, South China Sea Institute of Oceanology, Chinese Academy of Sciences / University of Chinese Academy of Sciences.
+
+- Email: `renjie22@mails.ucas.ac.cn`
+- ORCID: [0009-0000-2806-6771](https://orcid.org/0009-0000-2806-6771)
+- ResearchGate: [Jie Ren](https://www.researchgate.net/profile/Jie-Ren-126)
+
 ## License
 
 MIT License. See [LICENSE](https://github.com/Radianjayjay/marine-extremes/blob/main/LICENSE).

@@ -257,6 +257,14 @@ python benchmarks/bench_global_scale.py
 - Schlegel, R. W., Darmaraki, S., Benthuysen, J. A., Filbee-Dexter, K., & Oliver, E. C. J. (2021). Marine cold-spells. *Progress in Oceanography*, 198, 102684.
 - Reynolds, R. W., Smith, T. M., Liu, C., Chelton, D. B., Casey, K. S., & Schlax, M. G. (2007). Daily high-resolution-blended analyses for sea surface temperature. *Journal of Climate*, 20(22), 5473-5496.
 
+## 作者
+
+任杰（Jie Ren），中国科学院南海海洋研究所 / 中国科学院大学。
+
+- 邮箱：`renjie22@mails.ucas.ac.cn`
+- ORCID：[0009-0000-2806-6771](https://orcid.org/0009-0000-2806-6771)
+- ResearchGate：[Jie Ren](https://www.researchgate.net/profile/Jie-Ren-126)
+
 ## 许可证
 
 MIT License，详见 [LICENSE](LICENSE)。
