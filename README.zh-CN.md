@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/Radianjayjay/marine-extremes/actions/workflows/ci.yml/badge.svg)](https://github.com/Radianjayjay/marine-extremes/actions/workflows/ci.yml)
 [![PyPI](https://img.shields.io/pypi/v/marine-extremes.svg)](https://pypi.org/project/marine-extremes/)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.24579203.svg)](https://doi.org/10.5281/zenodo.24579203)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Python >= 3.11](https://img.shields.io/badge/Python-%3E%3D3.11-3776AB.svg)](pyproject.toml)
 [![Rust Core](https://img.shields.io/badge/Core-Rust%20%2B%20Rayon-DEA584.svg)](Cargo.toml)
@@ -239,6 +240,7 @@ python benchmarks/bench_global_scale.py
   title   = {marine-extremes: Rust-Accelerated Marine Heatwave, Cold Spell, and Marine Extreme Detection},
   version = {0.1.0},
   year    = {2026},
+  doi     = {10.5281/zenodo.24579203},
   url     = {https://github.com/Radianjayjay/marine-extremes}
 }
 ```

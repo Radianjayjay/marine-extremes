@@ -10,6 +10,14 @@ authors:
     orcid: "https://orcid.org/0009-0000-2806-6771"
 repository-code: "https://github.com/Radianjayjay/marine-extremes"
 url: "https://github.com/Radianjayjay/marine-extremes"
+doi: "10.5281/zenodo.24579203"
+identifiers:
+  - type: doi
+    value: "10.5281/zenodo.24579203"
+    description: "Zenodo Concept DOI (always resolves to the latest version)"
+  - type: doi
+    value: "10.5281/zenodo.24579204"
+    description: "Zenodo DOI for v0.1.0"
 abstract: >-
   Rust-accelerated Python package for detecting marine heatwaves (MHWs),
   marine cold spells (MCSs), and general scalar marine extremes across 1D-4D

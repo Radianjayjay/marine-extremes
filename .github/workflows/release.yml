@@ -4,6 +4,15 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      publish_to_pypi:
+        description: "Publish built wheels and sdist to PyPI via Trusted Publisher"
+        type: boolean
+        default: false
+      release_tag:
+        description: "Optional existing GitHub Release tag (e.g. v0.1.0) to attach built assets"
+        type: string
+        default: ""
 
 permissions:
   contents: read
@@ -18,9 +27,9 @@ jobs:
           python-version: "3.12"
       - uses: dtolnay/rust-toolchain@stable
       - name: Check version matches release tag
-        if: github.event_name == 'release'
+        if: github.event_name == 'release' || inputs.release_tag != ''
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag }}
         run: |
           python - <<'PY'
           import os, tomllib
@@ -50,18 +59,23 @@ jobs:
           - os: ubuntu-latest
             target: x86_64
             manylinux: auto
+            macos_target: ""
           - os: ubuntu-24.04-arm
             target: aarch64
             manylinux: auto
-          - os: macos-14
+            macos_target: ""
+          - os: macos-15
             target: aarch64
             manylinux: off
-          - os: macos-14
+            macos_target: "11.0"
+          - os: macos-15
             target: x86_64
             manylinux: off
+            macos_target: "10.15"
           - os: windows-latest
             target: x64
             manylinux: off
+            macos_target: ""
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
@@ -70,6 +84,8 @@ jobs:
           python-version: "3.12"
       - name: Build abi3 wheel
         uses: PyO3/maturin-action@v1
+        env:
+          MACOSX_DEPLOYMENT_TARGET: ${{ matrix.macos_target }}
         with:
           target: ${{ matrix.target }}
           args: --release --out dist
@@ -96,7 +112,7 @@ jobs:
 
   publish:
     needs: [wheels, sdist]
-    if: github.event_name == 'release'
+    if: github.event_name == 'release' || inputs.publish_to_pypi
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -122,6 +138,8 @@ jobs:
         with:
           packages-dir: dist/
       - name: Attach wheels and sdist to GitHub Release
+        if: github.event_name == 'release' || inputs.release_tag != ''
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag }}
           files: dist/*
