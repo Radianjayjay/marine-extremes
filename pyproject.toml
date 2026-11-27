@@ -1,0 +1,73 @@
+[build-system]
+requires = ["maturin>=1.7,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "marxtreme"
+version = "0.1.0"
+description = "High-performance, Rust-accelerated detection of marine heatwaves, marine cold spells, and general marine extremes across 1D-4D gridded and multi-calendar datasets."
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Radianjayjay" }]
+requires-python = ">=3.11"
+keywords = [
+    "oceanography",
+    "marine-heatwave",
+    "marine-cold-spell",
+    "climate",
+    "extremes",
+    "xarray",
+    "netcdf",
+    "zarr",
+    "matlab",
+    "rust",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Rust",
+    "Topic :: Scientific/Engineering :: Atmospheric Science",
+    "Topic :: Scientific/Engineering :: Physics",
+]
+dependencies = [
+    "numpy>=1.24",
+    "pandas>=2.0",
+    "pyarrow>=14.0",
+    "xarray>=2023.6",
+]
+
+[project.urls]
+Homepage = "https://github.com/Radianjayjay/marxtreme"
+Repository = "https://github.com/Radianjayjay/marxtreme"
+Issues = "https://github.com/Radianjayjay/marxtreme/issues"
+
+[project.optional-dependencies]
+netcdf = ["netCDF4>=1.6", "h5netcdf>=1.3", "cftime>=1.6", "dask>=2023.6"]
+mat = ["h5py>=3.9", "scipy>=1.11"]
+zarr = ["zarr>=3.0", "xarray>=2024.10", "cftime>=1.6", "dask>=2023.6"]
+io = [
+    "netCDF4>=1.6",
+    "h5netcdf>=1.3",
+    "h5py>=3.9",
+    "scipy>=1.11",
+    "zarr>=3.0",
+    "xarray>=2024.10",
+    "cftime>=1.6",
+    "dask>=2023.6",
+]
+dev = ["pytest>=7.4", "maturin>=1.7"]
+
+[tool.maturin]
+python-source = "python"
+module-name = "marxtreme._core"
+features = ["pyo3/extension-module"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra"

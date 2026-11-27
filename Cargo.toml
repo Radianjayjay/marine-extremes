@@ -1,0 +1,21 @@
+[package]
+name = "marxtreme"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Radianjayjay/marxtreme"
+description = "Rust-accelerated core for marine heatwave, marine cold spell, and general marine extreme event detection."
+
+[lib]
+name = "_core"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pyo3 = { version = "0.30", features = ["abi3-py311"] }
+numpy = "0.30"
+rayon = "1.12"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
