@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
-from marine_extremes.calendar import _is_cftime_obj
+from marine_extremes.calendar import _CF_TIME_UNITS_RE, _is_cftime_obj
 
 _ALIAS_SPECS: tuple[tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]], ...] = (
     (
@@ -49,7 +49,6 @@ CF_VAR_ALIASES: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
     key: (stds, vnames) for keys, stds, vnames in _ALIAS_SPECS for key in keys
 }
 
-_CF_TIME_UNITS_RE = re.compile(r"^\s*(?:seconds?|minutes?|hours?|days?|months?|years?)\s+since\s+", re.IGNORECASE)
 _COMMON_TIME_DIM_NAMES: frozenset[str] = frozenset({"time", "valid_time", "time_counter", "ocean_time", "t", "date", "dates"})
 _KELVIN_UNITS: frozenset[str] = frozenset({"degk", "deg_k", "degree_k", "degrees_k", "kelvin", "kelvins", "degree_kelvin", "degrees_kelvin", "°k", "°_k"})
 _CELSIUS_UNITS: frozenset[str] = frozenset({"degc", "deg_c", "degree_c", "degrees_c", "degree_celsius", "degrees_celsius", "celsius", "°c", "°_c"})

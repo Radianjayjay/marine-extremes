@@ -491,7 +491,12 @@ class _PreparedFixed(PreparedBaseline):
             src = self._ext_opened if self._ext_opened is not None else ctx.opened
             preloaded_clim = load_tile_as_pixels_x_time(src.da, tile, src.time_dim, self._clim_slice, dtype=ctx.tile_dtype)
         clim_act = np.ascontiguousarray(preloaded_clim[active_local], dtype=ctx.tile_dtype)
-        det_act = np.ascontiguousarray(det_tile[active_local], dtype=ctx.tile_dtype)
+        det_act = (
+            clim_act
+            if (self._union_slice is not None and self._clim_slice == ctx.det_slice)
+            else np.ascontiguousarray(det_tile[active_local], dtype=ctx.tile_dtype)
+        )
+        del det_tile, preloaded_clim
         res = self._plan.run_tile(
             clim_act,
             det_act,
@@ -650,7 +655,12 @@ class _PreparedMoving(PreparedBaseline):
             assert self._ext_opened is not None
             preloaded_clim = load_tile_as_pixels_x_time(self._ext_opened.da, tile, self._ext_opened.time_dim, dtype=ctx.tile_dtype)
         clim_act = np.ascontiguousarray(preloaded_clim[active_local], dtype=ctx.tile_dtype)
-        det_act = np.ascontiguousarray(det_tile[active_local], dtype=ctx.tile_dtype)
+        det_act = (
+            clim_act
+            if (self._ext_opened is None and ctx.det_slice == slice(0, int(ctx.cal_full.years.size)))
+            else np.ascontiguousarray(det_tile[active_local], dtype=ctx.tile_dtype)
+        )
+        del det_tile, preloaded_clim
         res = self._plan.run_tile(
             clim_act,
             det_act,

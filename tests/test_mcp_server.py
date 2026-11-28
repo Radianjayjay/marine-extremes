@@ -313,6 +313,15 @@ def test_path_safety_region_and_literal_bracket_filename(tmp_path: Path):
     info_td = mcp_server.inspect_dataset(str(td_nc))
     assert "min" not in info_td["spatial_coords"]["step"] and "dtype" in info_td["spatial_coords"]["step"]
 
+    subdaily_nc = tmp_path / "subdaily_6h.nc"
+    xr.Dataset(
+        {"sst": (("time", "lat"), np.ones((8, 2)), {"units": "degC"})},
+        coords={"time": pd.date_range("2000-01-01", periods=8, freq="6h"), "lat": [0.0, 1.0]},
+    ).to_netcdf(subdaily_nc)
+    info_6h = mcp_server.inspect_dataset(str(subdaily_nc))
+    assert info_6h["time_range"] == {"start": "2000-01-01", "end": "2000-01-02", "n_steps": 8, "calendar": "standard"}
+    assert any("sub-daily" in n for n in info_6h["notes"])
+
     for src, reg, exc_cls, pat, var_name in (
         (paths["cmip"], {"time": [2000, 2001]}, ValueError, "time dimension", None),
         (paths["oisst"], {"lat": [float("nan"), -29.0]}, ValueError, "finite", "sst"),

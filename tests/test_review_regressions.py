@@ -989,3 +989,303 @@ def test_r4_post_refactor_review_regressions(tmp_path: Path):
         assert len(r_zsp.events) == 0
 
 
+def test_multi_agency_timestamps_and_daily_dedup(tmp_path: Path) -> None:
+    import datetime as dt
+
+    cftime = pytest.importorskip("cftime")
+
+    # 1. Noon 12:00:00 input keeps 12:00:00 on intensity_ts.coords['time'], while event dates are uniform midnight across formats
+    t_noon = pd.date_range("2000-01-01 12:00:00", periods=40, freq="D")
+    vals = np.full(40, 20.0, dtype=np.float64)
+    vals[10:18] = 25.0
+    th = mx.FixedThreshold(threshold_high=23.0, climatology=20.0)
+
+    r_mem = mx.detect(vals, time=t_noon, baseline=th)
+    df_mem = r_mem.events.to_pandas()
+    assert df_mem["date_start"].dtype == np.dtype("datetime64[ns]")
+    assert df_mem["date_start"].iloc[0] == pd.Timestamp("2000-01-11")
+
+    for ext in ("out.nc", "out.parquet", "out.zarr", "out.csv"):
+        p = tmp_path / ext
+        with mx.detect(vals, time=t_noon, baseline=th, out=p) as r_out:
+            df_out = r_out.events.to_pandas()
+            assert df_out["date_start"].dtype == df_mem["date_start"].dtype
+            assert df_out["date_start"].iloc[0] == df_mem["date_start"].iloc[0]
+            assert df_out["date_end"].iloc[0] == df_mem["date_end"].iloc[0]
+            if r_out.intensity_ts is not None:
+                assert pd.Timestamp(r_out.intensity_ts.coords["time"].values[0]).hour == 12
+        with mx.open(p) as r_re:
+            assert r_re.events.to_pandas()["date_start"].dtype == df_mem["date_start"].dtype
+
+    # 2. Timezone-aware UTC DatetimeIndex & Python tz-aware datetime list
+    t_utc = pd.date_range("2001-01-01", periods=40, freq="D", tz="UTC")
+    assert len(mx.detect(vals, time=t_utc, baseline=th).events) == 1
+    t_py_utc = [dt.datetime(2001, 1, 1, 12, tzinfo=dt.timezone.utc) + dt.timedelta(days=i) for i in range(40)]
+    r_py_utc = mx.detect(vals, time=t_py_utc, baseline=th)
+    assert len(r_py_utc.events) == 1
+    assert r_py_utc.events.to_pandas()["date_start"].iloc[0] == pd.Timestamp("2001-01-11")
+
+    # 3. datetime64[s], [D], undecoded CF numeric coords, 8-digit YYYYMMDD ints, ISO strings (incl >2262)
+    t_s = np.arange(np.datetime64("2002-01-01", "s"), np.datetime64("2002-02-10", "s"), np.timedelta64(1, "D"))
+    assert len(mx.detect(vals, time=t_s, baseline=th).events) == 1
+
+    da_cf_num = xr.DataArray(
+        vals,
+        dims=("time",),
+        coords={"time": xr.DataArray(np.arange(40, dtype=np.float64), dims=("time",), attrs={"units": "days since 2000-01-01", "calendar": "noleap"})},
+    )
+    r_cf_num = mx.detect(da_cf_num, baseline=th)
+    assert r_cf_num.metadata["calendar"] == "noleap"
+    assert r_cf_num.events.to_pandas()["date_start"].iloc[0] == "2000-01-11"
+
+    da_cf_greg = xr.DataArray(
+        vals,
+        dims=("time",),
+        coords={"time": xr.DataArray(np.arange(40, dtype=np.float64), dims=("time",), attrs={"units": "days since 2000-01-01", "calendar": "standard"})},
+    )
+    assert mx.detect(da_cf_greg, baseline=th).events.to_pandas()["date_start"].iloc[0] == pd.Timestamp("2000-01-11")
+
+    t_ymd = np.array([int((pd.Timestamp("2000-01-01") + pd.Timedelta(days=i)).strftime("%Y%m%d")) for i in range(40)], dtype=np.int32)
+    assert mx.detect(vals, time=t_ymd, baseline=th).events.to_pandas()["date_start"].iloc[0] == pd.Timestamp("2000-01-11")
+
+    t_str_far = [f"2295-01-{1 + i:02d}" for i in range(25)]
+    assert str(mx.detect(vals[:25], time=t_str_far, baseline=th).events.to_pandas()["date_start"].iloc[0]).startswith("2295-01-11")
+
+    t_str_5y = [f"10000-01-{1 + i:02d}" for i in range(25)]
+    assert str(mx.detect(vals[:25], time=t_str_5y, baseline=th).events.to_pandas()["date_start"].iloc[0]).startswith("10000-01-11")
+
+    t_mixed_tz = [f"2000-01-{1 + i:02d}T12:00:00{'+00:00' if i % 2 == 0 else '+02:00'}" for i in range(25)]
+    assert len(mx.detect(vals[:25], time=t_mixed_tz, baseline=th).events) == 1
+
+    t_pre70 = pd.date_range("1950-06-01 12:00:00", periods=40, freq="D")
+    r_pre70 = mx.detect(vals, time=t_pre70, baseline=th)
+    assert r_pre70.events.to_pandas()["date_start"].iloc[0] == pd.Timestamp("1950-06-11")
+    assert pd.Timestamp(r_pre70.intensity_ts.coords["time"].values[0]).hour == 12
+
+    # 4. Invalid numeric coords & sub-daily duplicate calendar day under freq="daily" raise clean ValueError
+    with pytest.raises(ValueError, match="CF '<unit> since ...'"):
+        mx.detect(vals, time=np.arange(40, dtype=np.float64), baseline=th)
+    with pytest.raises(ValueError, match="CF '<unit> since ...'"):
+        mx.detect(vals[:2], time=np.array([20000230, 20000231]), baseline=th)
+    t_6h = pd.date_range("2000-01-01", periods=40, freq="6h")
+    with pytest.raises(ValueError, match="unique calendar dates"):
+        mx.detect(vals, time=t_6h, baseline=th, freq="daily")
+    assert cftime is not None
+
+
+def test_p0_to_p2_optimizations_clim_dtype_preload_summary_and_netcdf_schema(tmp_path: Path) -> None:
+    import h5py
+    from marine_extremes import mcp_server
+
+    # 1. MovingBaseline & FixedBaseline with clim_dtype="float32" across mem/.nc/.mat/.zarr + h5py grid_offset removal check
+    dates = pd.date_range("2000-01-01", "2002-12-31", freq="D")
+    rng = np.random.default_rng(7)
+    sst = 20.0 + 2.5 * np.sin(2 * np.pi * np.arange(len(dates)) / 365.25)[:, None, None] + rng.normal(0, 0.7, (len(dates), 4, 4))
+    sst[40:50, :2, :2] += 4.0
+    sst[:, 3, 3] = np.nan  # land pixel
+    da = xr.DataArray(
+        sst.astype(np.float32),
+        dims=("time", "lat", "lon"),
+        coords={"time": dates, "lat": np.arange(4, dtype=np.float64), "lon": np.arange(4, dtype=np.float64)},
+        name="sst",
+    )
+
+    r_mem = mx.detect(da, event="both", baseline=mx.MovingBaseline(window_years=2, center=True, boundary="clamp"), clim_dtype="float32", intensity_dtype="float32")
+    assert r_mem.clim.dtype == np.dtype(np.float32)
+    assert r_mem.thresh_high.dtype == np.dtype(np.float32)
+    assert r_mem.thresh_low.dtype == np.dtype(np.float32)
+    assert r_mem.metadata["clim_dtype"] == "float32"
+
+    for ext in ("mov32.nc", "mov32.mat", "mov32.zarr"):
+        p = tmp_path / ext
+        with mx.detect(da, event="both", baseline=mx.MovingBaseline(window_years=2, center=True, boundary="clamp"), clim_dtype="float32", intensity_dtype="float32", out=p) as res:
+            assert res.clim.dtype == np.dtype(np.float32)
+            assert res.thresh_high.dtype == np.dtype(np.float32)
+            assert res.thresh_low.dtype == np.dtype(np.float32)
+
+    nc_p = tmp_path / "mov32.nc"
+    with h5py.File(nc_p, "r") as hf:
+        assert "grid_offset" not in hf["events"]
+        assert "grid_offsets" in hf["events"]
+        assert hf["events"]["grid_offsets"].dtype == np.dtype(np.int64)
+
+    # 2. Preload fast path on NetCDF file matches out-of-core tile execution cleanly
+    src_nc = tmp_path / "src_grid.nc"
+    xr.Dataset({"sst": da}).to_netcdf(src_nc)
+    nc_pre = tmp_path / "preloaded.nc"
+    nc_tile = tmp_path / "tiled.nc"
+    with mx.detect(src_nc, baseline=mx.MovingBaseline(window_years=2, center=True, boundary="clamp"), clim_dtype="float32", memory_limit="1MB", out=nc_pre) as r_pre:
+        with mx.detect(da, baseline=mx.MovingBaseline(window_years=2, center=True, boundary="clamp"), clim_dtype="float32", memory_limit="200KB", out=nc_tile) as r_tile:
+            assert len(r_pre.events) == len(r_tile.events)
+            np.testing.assert_allclose(r_pre.clim.values, r_tile.clim.values, equal_nan=True)
+
+    # 3. EventCatalog.summary() and DetectResult.summary() match mcp_server.summarize_result()
+    s_cat = r_mem.events.summary()
+    s_res = r_mem.summary()
+    with mx.open(nc_p) as r_nc:
+        s_nc = r_nc.summary()
+        s_mcp = mcp_server.summarize_result(str(nc_p))
+        assert s_nc["n_events"] == s_mcp["n_events"]
+        assert s_nc["by_event_type"] == s_mcp["by_event_type"]
+        assert s_nc["by_category_max"] == s_mcp["by_category_max"]
+        assert s_nc["by_start_year"] == s_mcp["by_start_year"]
+        assert s_nc["spatial_counts"] == s_mcp["spatial_counts"]
+    assert s_res["n_events"] == s_cat["n_events"] == len(r_mem.events)
+
+
+def test_split_intensity_high_low_ts_and_cf_metadata_across_formats(tmp_path: Path) -> None:
+    import netCDF4 as nc4
+
+    dates = pd.date_range("2000-01-01", periods=30, freq="D")
+    vals = np.zeros((30, 1, 1), dtype=np.float64)
+    vals[2:9, 0, 0] = 3.0    # MHW / high
+    vals[14:21, 0, 0] = -2.5  # MCS / low
+    da = xr.DataArray(
+        vals,
+        dims=("time", "lat", "lon"),
+        coords={"time": dates, "lat": [0.0], "lon": [0.0]},
+        name="sst",
+        attrs={"units": "degC"},
+    )
+    th = mx.FixedThreshold(threshold_high=1.0, threshold_low=-1.0, climatology=0.0)
+
+    # 1. event="both" populates intensity_ts, intensity_high_ts (>=0), and intensity_low_ts (<=0)
+    r_both = mx.detect(da, event="both", baseline=th)
+    assert r_both.intensity_high_ts is not None and r_both.intensity_low_ts is not None
+    assert r_both.intensity_high_ts.attrs["units"] == "degC"
+    assert "value - clim" in r_both.intensity_low_ts.attrs["long_name"]
+    assert r_both.daily_category_ts.attrs["missing_value_code"] == mx.CATEGORY_MISSING
+    np.testing.assert_allclose(r_both.intensity_high_ts.values[0, 0, 5], 3.0)
+    assert r_both.intensity_high_ts.values[0, 0, 16] == 0.0
+    np.testing.assert_allclose(r_both.intensity_low_ts.values[0, 0, 16], -2.5)
+    assert r_both.intensity_low_ts.values[0, 0, 5] == 0.0
+
+    # 2. Single-direction modes share without populating opposite direction
+    r_hi = mx.detect(da, event="high", baseline=th)
+    assert r_hi.intensity_high_ts is not None and r_hi.intensity_low_ts is None
+    np.testing.assert_allclose(r_hi.intensity_high_ts.values, r_hi.intensity_ts.values, equal_nan=True)
+
+    r_lo = mx.detect(da, event="low", baseline=th)
+    assert r_lo.intensity_low_ts is not None and r_lo.intensity_high_ts is None
+    np.testing.assert_allclose(r_lo.intensity_low_ts.values, r_lo.intensity_ts.values, equal_nan=True)
+
+    # 3. Persistence round-trip + CF metadata across .nc, .zarr, .mat (v73), .mat (detectc), .npz
+    for ext, kw in (
+        ("split.nc", {}),
+        ("split.zarr", {}),
+        ("split_v73.mat", {"mat_layout": "v73"}),
+        ("split_v5.mat", {"mat_layout": "detectc"}),
+        ("split.npz", {}),
+    ):
+        p = tmp_path / ext
+        with mx.detect(da, event="both", baseline=th, out=p, **kw) as res:
+            assert res.intensity_high_ts is not None and res.intensity_low_ts is not None
+            assert res.daily_category_ts is not None and res.daily_category_ts.dtype == np.dtype(np.int8)
+            np.testing.assert_allclose(res.intensity_high_ts.values, r_both.intensity_high_ts.values, equal_nan=True)
+            np.testing.assert_allclose(res.intensity_low_ts.values, r_both.intensity_low_ts.values, equal_nan=True)
+            assert res.intensity_high_ts.attrs["units"] == "degC"
+            assert "long_name" in res.intensity_low_ts.attrs
+
+    ds_mem = r_both.to_dataset()
+    assert ds_mem["intensity_high_ts"].attrs["units"] == "degC"
+    assert "long_name" in ds_mem["intensity_low_ts"].attrs
+    saved_copy = tmp_path / "saved_copy.nc"
+    r_both.save(saved_copy)
+    with mx.open(saved_copy) as r_saved:
+        assert r_saved.intensity_high_ts is not None and r_saved.intensity_low_ts is not None
+        assert r_saved.intensity_high_ts.attrs["units"] == "degC"
+        assert "long_name" in r_saved.intensity_low_ts.attrs
+
+    from marine_extremes import mcp_server
+
+    dates_2y = pd.date_range("2000-01-01", "2001-12-31", freq="D")
+    vals_2y = np.zeros((len(dates_2y), 1, 1), dtype=np.float64)
+    vals_2y[20:30, 0, 0] = 3.0
+    vals_2y[80:90, 0, 0] = -2.5
+    src_nc = tmp_path / "mcp_split_in.nc"
+    xr.Dataset(
+        {"sst": (("time", "lat", "lon"), vals_2y, {"units": "degC"})},
+        coords={"time": dates_2y, "lat": [0.0], "lon": [0.0]},
+    ).to_netcdf(src_nc)
+    mcp_out = tmp_path / "mcp_split_out.nc"
+    det_mcp = mcp_server.detect_extremes(
+        str(src_nc), out=str(mcp_out), baseline_type="fixed",
+        event="both", clim_dtype="float32", intensity_dtype="float32",
+    )
+    assert det_mcp["metadata"]["clim_dtype"] == "float32"
+    with mx.open(mcp_out) as r_mcp:
+        assert r_mcp.clim is not None and r_mcp.clim.dtype == np.dtype(np.float32)
+        assert r_mcp.intensity_high_ts is not None and r_mcp.intensity_low_ts is not None
+
+    # Verify NetCDF preserves int8 without _FillValue while setting CF attrs
+    with nc4.Dataset(tmp_path / "split.nc", "r") as ncf:
+        assert ncf.variables["daily_category_ts"].dtype == np.dtype("i1")
+        assert "_FillValue" not in ncf.variables["daily_category_ts"].ncattrs()
+        assert int(ncf.variables["daily_category_ts"].getncattr("missing_value_code")) == mx.CATEGORY_MISSING
+        assert ncf.variables["intensity_high_ts"].getncattr("units") == "degC"
+        assert "long_name" in ncf.variables["intensity_low_ts"].ncattrs()
+
+
+def test_code_review_012_fixes_zarr_5digit_iso_chunks_and_cf_time_da(tmp_path: Path) -> None:
+    from marine_extremes.catalog import DiskEventStore, MemoryEventStore
+    from marine_extremes.calendar import _parse_iso_strings_to_dt64, parse_csv_date_series
+
+    # 1. FixedBaseline and DetrendedBaseline support clim_dtype="float32"
+    dates = pd.date_range("2000-01-01", "2001-12-31", freq="D")
+    rng = np.random.default_rng(19)
+    arr = (20.0 + rng.normal(0.0, 0.5, (dates.size, 2, 2))).astype(np.float32)
+    arr[20:30] += 5.0
+    da = xr.DataArray(arr, dims=("time", "lat", "lon"), coords={"time": dates, "lat": [0.0, 1.0], "lon": [0.0, 1.0]}, name="sst")
+    r_fix32 = mx.detect(da, baseline=mx.FixedBaseline(), clim_dtype="float32")
+    r_det32 = mx.detect(da, baseline=mx.DetrendedBaseline("linear"), clim_dtype="float32")
+    assert r_fix32.clim is not None and r_fix32.clim.dtype == np.dtype(np.float32)
+    assert r_det32.clim is not None and r_det32.clim.dtype == np.dtype(np.float32)
+
+    # 2. 5-digit ISO strings preserve time-of-day and timezone offsets (roll over to next UTC day)
+    parsed_utc = _parse_iso_strings_to_dt64(["10000-01-01T23:00:00-05:00", "10000-01-02T23:00:00-05:00"])
+    assert str(parsed_utc[0]) == "10000-01-02T04:00:00"
+    assert str(parsed_utc[1]) == "10000-01-03T04:00:00"
+    vals_y10k = np.full(40, 20.0)
+    vals_y10k[5:12] = 28.0
+    with pytest.raises(ValueError, match="unique calendar dates"):
+        mx.detect(vals_y10k[:2], time=["10000-01-01T00:00:00", "10000-01-01T12:00:00"], baseline=mx.FixedThreshold(threshold_high=25.0))
+
+    # 3. Year >= 10000 Zarr round-trip and CSV reopen preserve expected dtypes
+    t_10k = pd.Series(parse_csv_date_series(pd.Series(["10000-01-01", "10000-01-02"]))).to_numpy()
+    assert t_10k.dtype == np.dtype("datetime64[s]")
+    dates_10k = np.array([np.datetime64("10000-01-01", "s") + np.timedelta64(i, "D") for i in range(40)])
+    zarr_p = tmp_path / "year10000.zarr"
+    csv_p = tmp_path / "year10000.csv"
+    with mx.detect(vals_y10k, time=dates_10k, baseline=mx.FixedThreshold(threshold_high=25.0, climatology=20.0), out=zarr_p) as rz:
+        assert len(rz.events) == 1
+        assert str(rz.events.to_pandas()["date_start"].iloc[0]).startswith("10000-01-06")
+    with mx.open(zarr_p) as rz2:
+        assert len(rz2.events) == 1
+        assert rz2.intensity_ts is not None
+    with mx.detect(vals_y10k, time=dates_10k, baseline=mx.FixedThreshold(threshold_high=25.0, climatology=20.0), out=csv_p) as rc:
+        assert rc.events.to_pandas()["date_start"].dtype == np.dtype("datetime64[s]")
+    with mx.open(csv_p) as rc2:
+        assert rc2.events.to_pandas()["date_start"].dtype == np.dtype("datetime64[s]")
+
+    # 4. MemoryEventStore.iter_chunks respects chunk_rows and both stores validate chunk_rows >= 1
+    assert len(list(r_fix32.events.iter_chunks(chunk_rows=2))) >= 2
+    with pytest.raises(ValueError, match="chunk_rows"):
+        list(r_fix32.events.iter_chunks(chunk_rows=0))
+    mem_store = MemoryEventStore(r_fix32.events._store.to_arrow())
+    assert len(list(mem_store.iter_chunks(len(r_fix32.events), chunk_rows=1))) == max(1, len(r_fix32.events))
+    disk_store = DiskEventStore(zarr_p, slice_fn=lambda s, e: mem_store.slice_rows(s, e), read_all_fn=lambda: mem_store.to_arrow())
+    with pytest.raises(ValueError, match="chunk_rows"):
+        list(disk_store.iter_chunks(len(r_fix32.events), chunk_rows=0))
+
+    # 5. Raw ndarray + CF numeric DataArray time= preserves units/calendar attrs
+    cf_time_da = xr.DataArray(
+        np.arange(40, dtype=np.float64),
+        dims=("time",),
+        attrs={"units": "days since 2000-01-01 00:00:00", "calendar": "noleap"},
+    )
+    r_cf_np = mx.detect(vals_y10k, time=cf_time_da, baseline=mx.FixedThreshold(threshold_high=25.0, climatology=20.0))
+    assert r_cf_np.metadata["calendar"] == "noleap"
+    assert len(r_cf_np.events) == 1
+
+
+

@@ -305,25 +305,32 @@ define_packed_events! {
 
 #[derive(Clone, Copy)]
 struct TileFlags {
+    event_mode: EventMode,
     clim_stride: usize,
     clim: bool,
     hi: bool,
     lo: bool,
     trend: bool,
     intensity: bool,
+    intensity_high: bool,
+    intensity_low: bool,
     daily_cat: bool,
     event_cat: bool,
 }
 
 impl TileFlags {
-    fn ts_only(intensity: bool, daily_cat: bool, event_cat: bool) -> Self {
+    fn ts_only(event_mode: EventMode, intensity: bool, daily_cat: bool, event_cat: bool) -> Self {
+        let is_both = intensity && matches!(event_mode, EventMode::Both);
         Self {
+            event_mode,
             clim_stride: 0,
             clim: false,
             hi: false,
             lo: false,
             trend: false,
             intensity,
+            intensity_high: is_both,
+            intensity_low: is_both,
             daily_cat,
             event_cat,
         }
@@ -338,13 +345,17 @@ impl TileFlags {
         daily_cat: bool,
         event_cat: bool,
     ) -> Self {
+        let is_both = intensity && matches!(event_mode, EventMode::Both);
         Self {
+            event_mode,
             clim_stride,
             clim: return_clim,
             hi: return_clim && matches!(event_mode, EventMode::High | EventMode::Both),
             lo: return_clim && matches!(event_mode, EventMode::Low | EventMode::Both),
             trend,
             intensity,
+            intensity_high: is_both,
+            intensity_low: is_both,
             daily_cat,
             event_cat,
         }
@@ -357,6 +368,8 @@ struct PixelOuts<'a> {
     lo: Option<&'a mut [f64]>,
     trend: Option<&'a mut [f64]>,
     intensity: Option<&'a mut [f64]>,
+    intensity_high: Option<&'a mut [f64]>,
+    intensity_low: Option<&'a mut [f64]>,
     daily_cat: Option<&'a mut [i8]>,
     event_cat: Option<&'a mut [i8]>,
 }
@@ -368,6 +381,8 @@ struct TileOutBufs {
     lo: Vec<f64>,
     trend: Vec<f64>,
     intensity: Vec<f64>,
+    intensity_high: Vec<f64>,
+    intensity_low: Vec<f64>,
     daily_cat: Vec<i8>,
     event_cat: Vec<i8>,
 }
@@ -392,6 +407,8 @@ where
     let mut lo = if flags.lo { vec![f64::NAN; n_active * flags.clim_stride] } else { Vec::new() };
     let mut trend = if flags.trend { vec![f64::NAN; n_active * 3] } else { Vec::new() };
     let mut intensity = if flags.intensity { vec![f64::NAN; n_active * n_det] } else { Vec::new() };
+    let mut intensity_high = if flags.intensity_high { vec![f64::NAN; n_active * n_det] } else { Vec::new() };
+    let mut intensity_low = if flags.intensity_low { vec![f64::NAN; n_active * n_det] } else { Vec::new() };
     let mut daily_cat = if flags.daily_cat { vec![CATEGORY_MISSING; n_active * n_det] } else { Vec::new() };
     let mut event_cat = if flags.event_cat { vec![CATEGORY_MISSING; n_active * n_det] } else { Vec::new() };
 
@@ -401,6 +418,8 @@ where
         let l_slots = opt_chunks_mut(&mut lo, flags.clim_stride, n_active);
         let t_slots = opt_chunks_mut(&mut trend, 3, n_active);
         let i_slots = opt_chunks_mut(&mut intensity, n_det, n_active);
+        let ih_slots = opt_chunks_mut(&mut intensity_high, n_det, n_active);
+        let il_slots = opt_chunks_mut(&mut intensity_low, n_det, n_active);
         let d_slots = opt_chunks_mut(&mut daily_cat, n_det, n_active);
         let e_slots = opt_chunks_mut(&mut event_cat, n_det, n_active);
 
@@ -410,10 +429,12 @@ where
             .zip(l_slots.into_par_iter())
             .zip(t_slots.into_par_iter())
             .zip(i_slots.into_par_iter())
+            .zip(ih_slots.into_par_iter())
+            .zip(il_slots.into_par_iter())
             .zip(d_slots.into_par_iter())
             .zip(e_slots.into_par_iter())
             .enumerate()
-            .map_init(init_scratch, |scratch, (p, ((((((s, h), l), tr), i), dc), ec))| {
+            .map_init(init_scratch, |scratch, (p, ((((((((s, h), l), tr), i), ih), il), dc), ec))| {
                 per_pixel(
                     scratch,
                     p,
@@ -423,6 +444,8 @@ where
                         lo: l,
                         trend: tr,
                         intensity: i,
+                        intensity_high: ih,
+                        intensity_low: il,
                         daily_cat: dc,
                         event_cat: ec,
                     },
@@ -441,6 +464,8 @@ where
         lo,
         trend,
         intensity,
+        intensity_high,
+        intensity_low,
         daily_cat,
         event_cat,
     }
@@ -484,7 +509,24 @@ impl TileOutBufs {
     ) -> PyResult<Bound<'py, PyDict>> {
         let out = PyDict::new(py);
         out.set_item("events", packed_to_pydict(py, self.packed)?)?;
-        out.set_item("intensity_ts", vec_to_opt_array2(py, self.intensity, (n_active, n_det), flags.intensity)?)?;
+        let int_obj = vec_to_opt_array2(py, self.intensity, (n_active, n_det), flags.intensity)?;
+        out.set_item("intensity_ts", int_obj.clone_ref(py))?;
+        let hi_obj = if flags.intensity_high {
+            vec_to_opt_array2(py, self.intensity_high, (n_active, n_det), true)?
+        } else if flags.intensity && matches!(flags.event_mode, EventMode::High) {
+            int_obj.clone_ref(py)
+        } else {
+            py.None()
+        };
+        let lo_obj = if flags.intensity_low {
+            vec_to_opt_array2(py, self.intensity_low, (n_active, n_det), true)?
+        } else if flags.intensity && matches!(flags.event_mode, EventMode::Low) {
+            int_obj
+        } else {
+            py.None()
+        };
+        out.set_item("intensity_high_ts", hi_obj)?;
+        out.set_item("intensity_low_ts", lo_obj)?;
         out.set_item("daily_category_ts", vec_to_opt_array2(py, self.daily_cat, (n_active, n_det), flags.daily_cat)?)?;
         out.set_item("event_category_ts", vec_to_opt_array2(py, self.event_cat, (n_active, n_det), flags.event_cat)?)?;
 
@@ -595,6 +637,8 @@ impl FixedPlan {
             &self.detect_params,
             pad_buf,
             outs.intensity,
+            outs.intensity_high,
+            outs.intensity_low,
             outs.daily_cat,
             outs.event_cat,
         )
@@ -1121,7 +1165,8 @@ impl MovingPlan {
                     }
                     let evs = detect_pixel_with_curves(
                         active_idx[p], d_mat.row_f64(p, dbuf), st, ht, lt,
-                        &self.detect_params, pad, outs.intensity, outs.daily_cat, outs.event_cat,
+                        &self.detect_params, pad, outs.intensity, outs.intensity_high, outs.intensity_low,
+                        outs.daily_cat, outs.event_cat,
                     );
                     if let Some(ps) = outs.clim {
                         for (yi, &wi) in self.sched.year_window_idx.iter().enumerate() {
@@ -1221,7 +1266,7 @@ impl CurvesPlan {
         }
         validate_active_indices(active_idx, n_active, total_grid_pixels)?;
 
-        let flags = TileFlags::ts_only(return_intensity_ts, return_daily_category_ts, return_event_category_ts);
+        let flags = TileFlags::ts_only(self.params.event_mode, return_intensity_ts, return_daily_category_ts, return_event_category_ts);
         let bufs = py.detach(|| {
             run_tile_parallel(
                 n_active, n_det, total_grid_pixels, active_idx, flags, false,
@@ -1231,7 +1276,8 @@ impl CurvesPlan {
                     detect_pixel_with_curves(
                         active_idx[p], d_mat.row_f64(p, rbuf),
                         &s_slice[sl.clone()], &h_slice[sl.clone()], &l_slice[sl],
-                        &self.params, pad, outs.intensity, outs.daily_cat, outs.event_cat,
+                        &self.params, pad, outs.intensity, outs.intensity_high, outs.intensity_low,
+                        outs.daily_cat, outs.event_cat,
                     )
                 },
             )
@@ -1272,7 +1318,7 @@ impl CurvesPlan {
         }
         validate_active_indices(active_idx, n_active, total_grid_pixels)?;
 
-        let flags = TileFlags::ts_only(return_intensity_ts, return_daily_category_ts, return_event_category_ts);
+        let flags = TileFlags::ts_only(self.params.event_mode, return_intensity_ts, return_daily_category_ts, return_event_category_ts);
         let bufs = py.detach(|| {
             run_tile_parallel(
                 n_active, n_det, total_grid_pixels, active_idx, flags, false,
@@ -1282,7 +1328,8 @@ impl CurvesPlan {
                     expand_doy_curves(doys, &s_slice[sl.clone()], &h_slice[sl.clone()], &l_slice[sl], st, ht, lt);
                     detect_pixel_with_curves(
                         active_idx[p], d_mat.row_f64(p, rbuf), st, ht, lt,
-                        &self.params, pad, outs.intensity, outs.daily_cat, outs.event_cat,
+                        &self.params, pad, outs.intensity, outs.intensity_high, outs.intensity_low,
+                        outs.daily_cat, outs.event_cat,
                     )
                 },
             )

@@ -44,13 +44,13 @@ from marine_extremes.streaming import (
 CATEGORY_MISSING: int = int(_core.CATEGORY_MISSING)
 
 
-def _resolve_intensity_dtype(intensity_dtype: str) -> np.dtype:
-    """Validate and map intensity_ts output dtype ('float64' or 'float32')."""
-    if intensity_dtype == "float64":
+def _resolve_float_dtype(value: str, name: str) -> np.dtype:
+    """Validate and map float output dtype ('float64' or 'float32')."""
+    if value == "float64":
         return np.dtype(np.float64)
-    if intensity_dtype == "float32":
+    if value == "float32":
         return np.dtype(np.float32)
-    raise ValueError(f"intensity_dtype must be 'float64' or 'float32', got '{intensity_dtype}'")
+    raise ValueError(f"{name} must be 'float64' or 'float32', got '{value}'")
 
 
 def _normalize_percentile(p: float | None, name: str) -> float:
@@ -224,6 +224,7 @@ def detect(
     return_daily_category_ts: bool = True,
     return_event_category_ts: bool = False,
     working_dtype: Literal["auto", "float32", "float64"] = "auto",
+    clim_dtype: Literal["float64", "float32"] = "float64",
     intensity_dtype: Literal["float64", "float32"] = "float64",
     memory_limit: str | int = "4GB",
     out: str | Path | None = None,
@@ -253,7 +254,8 @@ def detect(
     p_hi = _normalize_percentile(pctile_high, "pctile_high") if ev_mode in ("high", "both") else float("nan")
     p_lo = _normalize_percentile(pctile_low, "pctile_low") if ev_mode in ("low", "both") else float("nan")
     mem_bytes = parse_memory_limit(memory_limit)
-    int_out_dtype = _resolve_intensity_dtype(intensity_dtype)
+    clim_out_dtype = _resolve_float_dtype(clim_dtype, "clim_dtype")
+    int_out_dtype = _resolve_float_dtype(intensity_dtype, "intensity_dtype")
 
     opened = open_data_input(
         data, var=var, time=time, time_dim=time_dim, squeeze_singleton=squeeze_singleton
@@ -270,6 +272,9 @@ def detect(
 
         eff_return_clim = return_clim and writes_grids
         eff_return_int = return_intensity_ts and writes_grids
+        eff_return_int_hi = eff_return_int and ev_mode in ("high", "both")
+        eff_return_int_lo = eff_return_int and ev_mode in ("low", "both")
+        n_int_arrays = 3 if (eff_return_int and ev_mode == "both") else (1 if eff_return_int else 0)
         eff_return_dcat = return_daily_category_ts and writes_grids
         eff_return_ecat = return_event_category_ts and writes_grids
 
@@ -308,19 +313,43 @@ def detect(
         prepared = prepare_baseline(base, ctx)
 
         # 2. Size tiles to stay within memory_limit and open output sink (in-memory or file).
-        max_tile = estimate_max_tile_pixels(
-            mem_bytes,
-            prepared.n_clim_eff,
-            int(cal_det.years.size),
-            return_intensity_ts=eff_return_int,
-            return_daily_category_ts=eff_return_dcat,
-            return_event_category_ts=eff_return_ecat,
-            moving_n_years=int(prepared.moving_years.size) if (prepared.moving_years is not None and eff_return_clim) else 0,
-            year_len=cal_full.year_len,
-            input_itemsize=tile_dtype.itemsize,
-            intensity_itemsize=int_out_dtype.itemsize,
-            extra_curves_count=prepared.extra_curves_count,
-        )
+        moving_n_yrs = int(prepared.moving_years.size) if (prepared.moving_years is not None and eff_return_clim) else 0
+        budget_kw: dict[str, Any] = {
+            "return_clim": prepared.want_clim_out,
+            "return_intensity_ts": eff_return_int,
+            "return_daily_category_ts": eff_return_dcat,
+            "return_event_category_ts": eff_return_ecat,
+            "moving_n_years": moving_n_yrs,
+            "year_len": cal_full.year_len,
+            "input_itemsize": tile_dtype.itemsize,
+            "clim_itemsize": clim_out_dtype.itemsize,
+            "intensity_itemsize": int_out_dtype.itemsize,
+            "n_intensity_arrays": n_int_arrays,
+            "extra_curves_count": prepared.extra_curves_count,
+        }
+        max_tile = estimate_max_tile_pixels(mem_bytes, prepared.n_clim_eff, int(cal_det.years.size), **budget_kw)
+
+        # Single-pass sequential pre-read avoids rescanning file-backed inputs (e.g. time=UNLIMITED NetCDF) per tile.
+        total_pixels = int(math.prod(opened.spatial_shape)) if opened.spatial_shape else 1
+        if opened.closers and opened.spatial_dims and total_pixels > max_tile:
+            raw_itemsize = np.dtype(opened.da.dtype).itemsize
+            per_step_bytes = tile_dtype.itemsize if raw_itemsize == tile_dtype.itemsize else raw_itemsize + tile_dtype.itemsize
+            peak_in_bytes = total_pixels * int(opened.da.sizes[opened.time_dim]) * per_step_bytes
+            if peak_in_bytes <= int(mem_bytes * 0.45):
+                arr_mem = np.asarray(opened.da.values, dtype=tile_dtype)
+                opened.da = xr.DataArray(
+                    arr_mem,
+                    dims=opened.da.dims,
+                    coords=opened.da.coords,
+                    name=opened.da.name,
+                    attrs=opened.da.attrs,
+                )
+                max_tile = estimate_max_tile_pixels(
+                    max(mem_bytes - arr_mem.nbytes, mem_bytes // 4),
+                    prepared.n_clim_eff,
+                    int(cal_det.years.size),
+                    **budget_kw,
+                )
 
         metadata: dict[str, Any] = {
             "variable": opened.da.name or var or "value",
@@ -332,6 +361,7 @@ def detect(
             "date_resolution": datetime64_resolution(cal_det.raw_time, cal_det.is_cftime),
             "freq": freq,
             "working_dtype": str(tile_dtype),
+            "clim_dtype": str(clim_out_dtype),
             "intensity_dtype": str(int_out_dtype),
             "window_half_width": w_half,
             "smooth_width": sm_w,
@@ -356,7 +386,10 @@ def detect(
             write_clim=prepared.want_clim_out,
             write_thresh_high=prepared.want_hi_out,
             write_thresh_low=prepared.want_lo_out,
+            clim_dtype=clim_out_dtype,
             write_intensity_ts=eff_return_int,
+            write_intensity_high_ts=eff_return_int_hi,
+            write_intensity_low_ts=eff_return_int_lo,
             intensity_dtype=int_out_dtype,
             write_daily_category_ts=eff_return_dcat,
             write_event_category_ts=eff_return_ecat,
@@ -376,15 +409,18 @@ def detect(
                     tile,
                     active_local,
                     cal_det,
-                    raw_events=res_core["events"],
-                    clim=res_core.get("clim"),
-                    thresh_high=res_core.get("thresh_high"),
-                    thresh_low=res_core.get("thresh_low"),
-                    intensity_ts=res_core.get("intensity_ts"),
-                    daily_category_ts=res_core.get("daily_category_ts"),
-                    event_category_ts=res_core.get("event_category_ts"),
-                    trend=res_core.get("trend"),
+                    raw_events=res_core.pop("events"),
+                    clim=res_core.pop("clim", None),
+                    thresh_high=res_core.pop("thresh_high", None),
+                    thresh_low=res_core.pop("thresh_low", None),
+                    intensity_ts=res_core.pop("intensity_ts", None),
+                    intensity_high_ts=res_core.pop("intensity_high_ts", None),
+                    intensity_low_ts=res_core.pop("intensity_low_ts", None),
+                    daily_category_ts=res_core.pop("daily_category_ts", None),
+                    event_category_ts=res_core.pop("event_category_ts", None),
+                    trend=res_core.pop("trend", None),
                 )
+            del res_core
 
         result = sink.finalize(cal_det)
         sink = None

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from pathlib import Path
 from typing import Any, Callable, Iterator, Protocol
 
@@ -10,7 +11,7 @@ import pandas as pd
 import pyarrow as pa
 import xarray as xr
 
-from marine_extremes.calendar import CalendarInfo, format_date_column, yyyymmdd_to_dates
+from marine_extremes.calendar import CalendarInfo, dates_to_yyyymmdd, format_date_column, yyyymmdd_to_dates
 
 # ---------------------------------------------------------------------------
 # Single authoritative event schema & column codecs
@@ -243,7 +244,14 @@ class MemoryEventStore:
         return self._table
 
     def iter_chunks(self, n_rows: int, chunk_rows: int = 200_000) -> Iterator[pa.Table]:
-        yield self._table
+        if chunk_rows < 1:
+            raise ValueError(f"chunk_rows must be >= 1, got {chunk_rows}")
+        total = self._table.num_rows
+        if total <= 0:
+            yield self._table.slice(0, 0)
+            return
+        for s0 in range(0, total, chunk_rows):
+            yield self._table.slice(s0, min(chunk_rows, total - s0))
 
 
 class DiskEventStore:
@@ -289,6 +297,8 @@ class DiskEventStore:
         return self._read_all_fn()
 
     def iter_chunks(self, n_rows: int, chunk_rows: int = 200_000) -> Iterator[pa.Table]:
+        if chunk_rows < 1:
+            raise ValueError(f"chunk_rows must be >= 1, got {chunk_rows}")
         if n_rows <= 0:
             yield self._slice_fn(0, 0)
             return
@@ -457,6 +467,59 @@ class EventCatalog:
             coords={d: self.spatial_coords[d] for d in self.spatial_dims},
             name="event_count",
         )
+
+    def summary(self, *, chunk_rows: int = 200_000) -> dict[str, Any]:
+        """Aggregate event counts, categories, start years, duration stats, and peak intensity in chunks."""
+        cmap = np.asarray(self.count_map().values)
+        by_type: Counter[str] = Counter()
+        by_cat: Counter[int] = Counter()
+        by_year: Counter[int] = Counter()
+        dur_min: int | None = None
+        dur_max: int | None = None
+        dur_sum = 0
+        n_total = len(self)
+        max_abs_int: float | None = None
+
+        for chunk in self.iter_chunks(chunk_rows=chunk_rows):
+            df = chunk.to_pandas()
+            if df.empty:
+                continue
+            vc = df["event_type"].astype(str).value_counts()
+            by_type.update({str(k): int(v) for k, v in vc.items()})
+            for counter, arr in (
+                (by_cat, df["category_max"].to_numpy()),
+                (by_year, dates_to_yyyymmdd(df["date_start"]) // 10000),
+            ):
+                vals, cnts = np.unique(arr, return_counts=True)
+                counter.update({int(k): int(v) for k, v in zip(vals.tolist(), cnts.tolist())})
+
+            durs = df["duration"].to_numpy()
+            dur_min = int(np.min(durs)) if dur_min is None else min(dur_min, int(np.min(durs)))
+            dur_max = int(np.max(durs)) if dur_max is None else max(dur_max, int(np.max(durs)))
+            dur_sum += int(np.sum(durs))
+
+            abs_vals = np.abs(df["int_max"].to_numpy(dtype=np.float64))
+            fin = abs_vals[np.isfinite(abs_vals)]
+            if fin.size > 0:
+                abs_i = float(np.max(fin))
+                max_abs_int = abs_i if max_abs_int is None else max(max_abs_int, abs_i)
+
+        return {
+            "n_events": n_total,
+            "spatial_dims": list(self.spatial_dims),
+            "spatial_shape": list(self.spatial_shape),
+            "spatial_counts": {
+                "n_pixels": int(cmap.size),
+                "pixels_with_events": int(np.count_nonzero(cmap)),
+                "max_events_per_pixel": int(np.max(cmap)) if cmap.size else 0,
+                "mean_events_per_pixel": float(np.mean(cmap)) if cmap.size else 0.0,
+            },
+            "by_event_type": dict(by_type),
+            "by_category_max": {str(k): int(by_cat[k]) for k in sorted(by_cat)},
+            "by_start_year": {str(k): int(by_year[k]) for k in sorted(by_year)},
+            "duration": {"min": dur_min, "mean": (dur_sum / n_total) if n_total > 0 else None, "max": dur_max},
+            "max_abs_intensity": max_abs_int,
+        }
 
     def to_arrow(self) -> pa.Table:
         """Return the full catalog as a PyArrow Table."""

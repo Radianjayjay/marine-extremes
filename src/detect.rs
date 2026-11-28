@@ -144,29 +144,45 @@ pub fn detect_pixel_with_curves(
     params: &DetectParams,
     pad_buf: &mut Vec<f64>,
     mut intensity_out: Option<&mut [f64]>,
+    mut intensity_high_out: Option<&mut [f64]>,
+    mut intensity_low_out: Option<&mut [f64]>,
     mut daily_cat_out: Option<&mut [i8]>,
     mut event_cat_out: Option<&mut [i8]>,
 ) -> Vec<EventRecord> {
     let n = raw_values.len();
     pad_short_gaps(raw_values, params.max_pad_length, pad_buf);
 
-    let day_is_active = |t: usize| -> bool {
-        if !(pad_buf[t].is_finite() && seas_t[t].is_finite()) {
-            return false;
-        }
-        if params.event_mode == EventMode::Low && params.bound_policy == BoundPolicy::Mask {
+    let low_is_masked = |t: usize| -> bool {
+        if params.bound_policy == BoundPolicy::Mask {
             if let Some(lb) = params.lower_bound {
-                if seas_t[t] <= lb + 1e-9 || thresh_low_t[t] <= lb + 1e-9 {
-                    return false;
-                }
+                return seas_t[t] <= lb + 1e-9 || thresh_low_t[t] <= lb + 1e-9;
             }
         }
-        true
+        false
+    };
+    let day_is_active = |t: usize| -> bool {
+        pad_buf[t].is_finite()
+            && seas_t[t].is_finite()
+            && !(params.event_mode == EventMode::Low && low_is_masked(t))
     };
 
     if let Some(ref mut v) = intensity_out {
         for t in 0..n {
             v[t] = if day_is_active(t) { 0.0 } else { f64::NAN };
+        }
+    }
+    if let Some(ref mut v) = intensity_high_out {
+        for t in 0..n {
+            v[t] = if pad_buf[t].is_finite() && seas_t[t].is_finite() { 0.0 } else { f64::NAN };
+        }
+    }
+    if let Some(ref mut v) = intensity_low_out {
+        for t in 0..n {
+            v[t] = if pad_buf[t].is_finite() && seas_t[t].is_finite() && !low_is_masked(t) {
+                0.0
+            } else {
+                f64::NAN
+            };
         }
     }
     if let Some(ref mut v) = daily_cat_out {
@@ -192,6 +208,7 @@ pub fn detect_pixel_with_curves(
             params,
             &mut events,
             intensity_out.as_deref_mut(),
+            intensity_high_out.as_deref_mut(),
             daily_cat_out.as_deref_mut(),
             event_cat_out.as_deref_mut(),
         );
@@ -207,6 +224,7 @@ pub fn detect_pixel_with_curves(
             params,
             &mut events,
             intensity_out.as_deref_mut(),
+            intensity_low_out.as_deref_mut(),
             daily_cat_out.as_deref_mut(),
             event_cat_out.as_deref_mut(),
         );
@@ -230,6 +248,7 @@ fn detect_direction(
     params: &DetectParams,
     out_events: &mut Vec<EventRecord>,
     mut intensity_ts: Option<&mut [f64]>,
+    mut dir_intensity_ts: Option<&mut [f64]>,
     mut daily_cat_ts: Option<&mut [i8]>,
     mut event_cat_ts: Option<&mut [i8]>,
 ) {
@@ -393,7 +412,10 @@ fn detect_direction(
                 4 => c_ext += 1,
                 _ => {}
             }
-            // In `event="both"`, avoid overwriting an active high-event day with a non-exceeding low gap day.
+            // Dedicated per-direction series never overwrites across high/low gaps; combined intensity_ts preserves legacy precedence.
+            if let Some(ref mut dits) = dir_intensity_ts {
+                dits[t] = anom;
+            }
             if let Some(ref mut its) = intensity_ts {
                 if is_high || exceed_here || its[t] == 0.0 {
                     its[t] = anom;
@@ -620,6 +642,8 @@ mod tests {
             &params,
             &mut buf,
             Some(&mut its),
+            None,
+            None,
             Some(&mut dcat),
             Some(&mut ecat),
         );
@@ -664,9 +688,50 @@ mod tests {
             compat: CompatConfig::default(),
         };
         let mut buf = Vec::new();
-        let evs = detect_pixel_with_curves(0, &vals, &seas, &th_h, &th_l, &params, &mut buf, None, None, None);
+        let evs = detect_pixel_with_curves(0, &vals, &seas, &th_h, &th_l, &params, &mut buf, None, None, None, None, None);
         assert_eq!(evs.len(), 1);
         assert_eq!(evs[0].category_max, 1); // safely guarded, never Inf/NaN
         assert!(evs[0].near_lower_bound);
+    }
+
+    #[test]
+    fn test_split_high_low_intensity_both_and_mask() {
+        let mut vals = vec![0.0; 25];
+        for t in 2..8 {
+            vals[t] = 3.0; // high event
+        }
+        for t in 12..18 {
+            vals[t] = -2.5; // low event
+        }
+        let seas = vec![0.0; 25];
+        let mut th_h = vec![1.0; 25];
+        let mut th_l = vec![-1.0; 25];
+        // Mask step 20 on low bound (-1.8): low intensity should be NaN there, high keeps 0.0
+        th_l[20] = -1.8;
+        th_h[20] = 1.0;
+        let params = DetectParams {
+            event_mode: EventMode::Both,
+            min_duration: 5,
+            max_gap: 2,
+            max_pad_length: 0,
+            lower_bound: Some(-1.8),
+            bound_policy: BoundPolicy::Mask,
+            compat: CompatConfig::default(),
+        };
+        let mut buf = Vec::new();
+        let mut its = vec![f64::NAN; 25];
+        let mut its_hi = vec![f64::NAN; 25];
+        let mut its_lo = vec![f64::NAN; 25];
+        let evs = detect_pixel_with_curves(
+            0, &vals, &seas, &th_h, &th_l, &params, &mut buf,
+            Some(&mut its), Some(&mut its_hi), Some(&mut its_lo), None, None,
+        );
+        assert_eq!(evs.len(), 2);
+        assert!((its_hi[4] - 3.0).abs() < 1e-12);
+        assert_eq!(its_hi[14], 0.0);
+        assert_eq!(its_lo[4], 0.0);
+        assert!((its_lo[14] + 2.5).abs() < 1e-12);
+        assert_eq!(its_hi[20], 0.0);
+        assert!(its_lo[20].is_nan());
     }
 }

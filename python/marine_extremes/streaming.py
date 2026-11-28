@@ -177,10 +177,11 @@ def open_data_input(
             if t_arr.ndim != 1:
                 raise ValueError("`time` must be a 1D array.")
             n_t = t_arr.shape[0]
+            t_coord: Any = (synth_time_dim, t_arr, dict(time.attrs)) if isinstance(time, xr.DataArray) else t_arr
             if arr.ndim == 1:
                 if arr.shape[0] != n_t:
                     raise ValueError(f"1D array length {arr.shape[0]} != len(time) {n_t}")
-                da = xr.DataArray(arr, dims=(synth_time_dim,), coords={synth_time_dim: t_arr}, name=var or "value")
+                da = xr.DataArray(arr, dims=(synth_time_dim,), coords={synth_time_dim: t_coord}, name=var or "value")
             else:
                 # Auto-detect whether time is axis 0 (Python/CF) or axis -1 (MATLAB m_mhw)
                 if arr.shape[0] == n_t:
@@ -199,11 +200,13 @@ def open_data_input(
                     else:
                         dims.append(f"dim_{spatial_i}")
                         spatial_i += 1
-                coords: dict[str, Any] = {synth_time_dim: t_arr}
+                coords: dict[str, Any] = {synth_time_dim: t_coord}
                 for ax, dname in enumerate(dims):
                     if dname != synth_time_dim:
                         coords[dname] = np.arange(arr.shape[ax], dtype=np.int64)
                 da = xr.DataArray(arr, dims=tuple(dims), coords=coords, name=var or "value")
+            if isinstance(time, xr.DataArray) and time.encoding:
+                da.coords[synth_time_dim].encoding.update(time.encoding)
 
         resolved_time_dim = resolve_time_dim(da, time_dim)
         da = _squeeze_singleton_dims(da, resolved_time_dim, squeeze_singleton)
@@ -289,6 +292,9 @@ def iter_spatial_tiles(
             break
 
     step = max(1, max_tile_pixels // strides[split_axis])
+    # Align split step to 16-row HDF5 chunk boundaries so tiles do not trigger chunk read-modify-write.
+    if step >= 16:
+        step = (step // 16) * 16
     prefix_ranges = [range(spatial_shape[a]) for a in range(split_axis)]
     flat_cursor = 0
 
@@ -341,26 +347,29 @@ def estimate_max_tile_pixels(
     n_clim_time: int,
     n_det_time: int,
     *,
+    return_clim: bool = True,
     return_intensity_ts: bool,
     return_daily_category_ts: bool,
     return_event_category_ts: bool,
     moving_n_years: int = 0,
     year_len: int = 366,
     input_itemsize: int = 8,
+    clim_itemsize: int = 8,
     intensity_itemsize: int = 8,
+    n_intensity_arrays: int = 1,
     extra_curves_count: int = 0,
 ) -> int:
     """Estimate safe tile pixel count staying comfortably within ``memory_limit_bytes``."""
     bytes_per_pixel = input_itemsize * (n_clim_time + n_det_time) * 2
     if extra_curves_count > 0:
         bytes_per_pixel += 8 * extra_curves_count * n_det_time
-    if moving_n_years > 0:
-        bytes_per_pixel += 8 * 3 * moving_n_years * year_len
-    else:
-        bytes_per_pixel += 8 * 3 * year_len
-    if return_intensity_ts:
-        # Rust allocates f64 intensity_ts before optional f32 cast on scatter
-        bytes_per_pixel += (8 + intensity_itemsize) * n_det_time
+    if return_clim:
+        n_clim_curves = 3 * (moving_n_years if moving_n_years > 0 else 1) * year_len
+        # Rust emits f64 clim/thresholds before optional float32 cast on scatter
+        bytes_per_pixel += (8 + clim_itemsize) * n_clim_curves
+    if return_intensity_ts and n_intensity_arrays > 0:
+        # Rust allocates f64 intensity buffer(s) before optional f32 cast on scatter
+        bytes_per_pixel += n_intensity_arrays * (8 + intensity_itemsize) * n_det_time
     if return_daily_category_ts:
         bytes_per_pixel += n_det_time * 2
     if return_event_category_ts:

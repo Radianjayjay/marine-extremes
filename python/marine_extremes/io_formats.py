@@ -65,9 +65,93 @@ TREND_VAR_KEYS: tuple[tuple[str, str], ...] = (
     ("quadratic_per_step2", "trend_quadratic_per_step2"),
 )
 CLIM_VAR_NAMES: tuple[str, ...] = ("clim", "thresh_high", "thresh_low")
-TS_VAR_NAMES: tuple[str, ...] = ("intensity_ts", "daily_category_ts", "event_category_ts")
+TS_VAR_NAMES: tuple[str, ...] = (
+    "intensity_ts",
+    "intensity_high_ts",
+    "intensity_low_ts",
+    "daily_category_ts",
+    "event_category_ts",
+)
 TREND_VAR_NAMES: tuple[str, ...] = tuple(full for _, full in TREND_VAR_KEYS)
 ALL_GRID_VAR_NAMES: frozenset[str] = frozenset((*CLIM_VAR_NAMES, *TS_VAR_NAMES, *TREND_VAR_NAMES))
+
+_GRID_VAR_META: dict[str, tuple[str, str, bool]] = {
+    "clim": (
+        "Seasonal climatology",
+        "Baseline seasonal climatology computed per calendar day-of-year or month.",
+        True,
+    ),
+    "thresh_high": (
+        "Upper extreme threshold",
+        "Upper percentile or fixed threshold defining high extreme events (e.g., MHWs).",
+        True,
+    ),
+    "thresh_low": (
+        "Lower extreme threshold",
+        "Lower percentile or fixed threshold defining low extreme events (e.g., MCSs).",
+        True,
+    ),
+    "intensity_ts": (
+        "Combined extreme event intensity anomaly (value - clim)",
+        "Hobday-convention intensity anomaly (value - clim) inside active high or low events; 0.0 on non-event active steps, NaN on land/missing (active exceedance overrides opposite-tail gaps; high wins on gap ties).",
+        True,
+    ),
+    "intensity_high_ts": (
+        "High extreme event intensity anomaly (value - clim)",
+        "Hobday-convention intensity anomaly (value - clim) inside active upper-tail events (e.g., MHWs); 0.0 on non-event active steps, NaN on land/missing.",
+        True,
+    ),
+    "intensity_low_ts": (
+        "Low extreme event intensity anomaly (value - clim)",
+        "Hobday-convention intensity anomaly (value - clim) inside active lower-tail events (e.g., MCSs, negative values); 0.0 on non-event active steps, NaN on land/missing/masked.",
+        True,
+    ),
+    "daily_category_ts": (
+        "Daily Hobday event severity category",
+        "+1..+4 high Cat I-IV, -1..-4 low Cat I-IV, 0 normal, -128 missing",
+        False,
+    ),
+    "event_category_ts": (
+        "Event peak severity category",
+        "Event peak category (+1..+4 high, -1..-4 low) mapped across event span; 0 normal, -128 missing",
+        False,
+    ),
+    "trend_intercept": (
+        "Detrended baseline OLS intercept",
+        "Ordinary least-squares intercept fitted per pixel before climatology computation.",
+        True,
+    ),
+    "trend_slope_per_step": (
+        "Detrended baseline linear slope per step",
+        "Ordinary least-squares linear trend per time step.",
+        True,
+    ),
+    "trend_quadratic_per_step2": (
+        "Detrended baseline quadratic coefficient per step squared",
+        "Ordinary least-squares quadratic trend coefficient per squared step.",
+        True,
+    ),
+}
+
+
+def grid_var_attrs(name: str, units: str = "") -> dict[str, Any]:
+    """Build CF-friendly long_name, description, optional units, and category sentinel attributes."""
+    meta = _GRID_VAR_META.get(name)
+    if meta is None:
+        return {}
+    long_name, desc, has_units = meta
+    attrs: dict[str, Any] = {"long_name": long_name, "description": desc}
+    clean_u = units.strip()
+    if has_units and clean_u:
+        if name == "trend_slope_per_step":
+            attrs["units"] = f"{clean_u} step-1"
+        elif name == "trend_quadratic_per_step2":
+            attrs["units"] = f"{clean_u} step-2"
+        else:
+            attrs["units"] = clean_u
+    if name in ("daily_category_ts", "event_category_ts"):
+        attrs["missing_value_code"] = CATEGORY_MISSING
+    return attrs
 
 _EXT_TO_FORMAT: dict[str, OutFormat] = {
     ".nc": "netcdf",
@@ -118,7 +202,10 @@ class OutputSpec:
     write_clim: bool = False
     write_thresh_high: bool = False
     write_thresh_low: bool = False
+    clim_dtype: np.dtype = field(default_factory=lambda: np.dtype(np.float64))
     write_intensity_ts: bool = False
+    write_intensity_high_ts: bool = False
+    write_intensity_low_ts: bool = False
     intensity_dtype: np.dtype = field(default_factory=lambda: np.dtype(np.float64))
     write_daily_category_ts: bool = False
     write_event_category_ts: bool = False
@@ -137,7 +224,11 @@ class OutputSpec:
     @property
     def has_ts(self) -> bool:
         return (
-            self.write_intensity_ts or self.write_daily_category_ts or self.write_event_category_ts
+            self.write_intensity_ts
+            or self.write_intensity_high_ts
+            or self.write_intensity_low_ts
+            or self.write_daily_category_ts
+            or self.write_event_category_ts
         ) and self.det_time.size > 0
 
     @property
@@ -176,10 +267,15 @@ class OutputSpec:
                 (self.write_thresh_low, "thresh_low"),
             ):
                 if flag:
-                    out.append((name, self.clim_dims, self.clim_shape, np.dtype(np.float64), np.nan))
+                    out.append((name, self.clim_dims, self.clim_shape, np.dtype(self.clim_dtype), np.nan))
         if self.has_ts:
-            if self.write_intensity_ts:
-                out.append(("intensity_ts", self.ts_dims, self.ts_shape, np.dtype(self.intensity_dtype), np.nan))
+            for flag, name in (
+                (self.write_intensity_ts, "intensity_ts"),
+                (self.write_intensity_high_ts, "intensity_high_ts"),
+                (self.write_intensity_low_ts, "intensity_low_ts"),
+            ):
+                if flag:
+                    out.append((name, self.ts_dims, self.ts_shape, np.dtype(self.intensity_dtype), np.nan))
             if self.write_daily_category_ts:
                 out.append(("daily_category_ts", self.ts_dims, self.ts_shape, np.dtype(np.int8), np.int8(CATEGORY_MISSING)))
             if self.write_event_category_ts:
@@ -215,7 +311,13 @@ class OutputSpec:
         """Extract an OutputSpec and ordered (name, DataArray, target_dims) sources from a DetectResult."""
         time_dim = "time"
         det_time = np.array([], dtype="datetime64[ns]")
-        for ts_da in (result.intensity_ts, result.daily_category_ts, result.event_category_ts):
+        for ts_da in (
+            result.intensity_ts,
+            result.intensity_high_ts,
+            result.intensity_low_ts,
+            result.daily_category_ts,
+            result.event_category_ts,
+        ):
             if ts_da is not None:
                 if result.events is not None:
                     extra = [d for d in ts_da.dims if d not in result.events.spatial_dims]
@@ -230,6 +332,8 @@ class OutputSpec:
                 da
                 for da in (
                     result.intensity_ts,
+                    result.intensity_high_ts,
+                    result.intensity_low_ts,
                     result.daily_category_ts,
                     result.event_category_ts,
                     result.clim,
@@ -259,7 +363,9 @@ class OutputSpec:
             if (clim_ref is not None and "year" in clim_ref.dims)
             else None
         )
-        int_dtype = np.dtype(result.intensity_ts.dtype) if result.intensity_ts is not None else np.dtype(np.float64)
+        clim_dtype = np.dtype(clim_ref.dtype) if clim_ref is not None else np.dtype(np.float64)
+        int_ref = next((da for da in (result.intensity_ts, result.intensity_high_ts, result.intensity_low_ts) if da is not None), None)
+        int_dtype = np.dtype(int_ref.dtype) if int_ref is not None else np.dtype(np.float64)
         meta_out = {**result.metadata, "out_format": fmt}
 
         spec = cls(
@@ -273,7 +379,10 @@ class OutputSpec:
             write_clim=result.clim is not None,
             write_thresh_high=result.thresh_high is not None,
             write_thresh_low=result.thresh_low is not None,
+            clim_dtype=clim_dtype,
             write_intensity_ts=result.intensity_ts is not None,
+            write_intensity_high_ts=result.intensity_high_ts is not None,
+            write_intensity_low_ts=result.intensity_low_ts is not None,
             intensity_dtype=int_dtype,
             write_daily_category_ts=result.daily_category_ts is not None,
             write_event_category_ts=result.event_category_ts is not None,
@@ -288,6 +397,8 @@ class OutputSpec:
             ("thresh_high", result.thresh_high, spec.clim_dims),
             ("thresh_low", result.thresh_low, spec.clim_dims),
             ("intensity_ts", result.intensity_ts, spec.ts_dims),
+            ("intensity_high_ts", result.intensity_high_ts, spec.ts_dims),
+            ("intensity_low_ts", result.intensity_low_ts, spec.ts_dims),
             ("daily_category_ts", result.daily_category_ts, spec.ts_dims),
             ("event_category_ts", result.event_category_ts, spec.ts_dims),
         ):
@@ -692,23 +803,20 @@ class _NetCDFWriter:
                 v_t.calendar = t_cal
                 v_t[:] = t_days
 
+            units_str = str(spec.attrs.get("units", "")).strip()
             for name, dims, shape, dt, fill in spec.grid_var_specs():
                 chunks = _compute_bounded_chunks(shape, dt.itemsize) if dims else None
-                kw: dict[str, Any] = {"zlib": True, "complevel": 4} if dims else {}
+                kw: dict[str, Any] = {"zlib": True, "complevel": 1} if dims else {}
                 if chunks:
                     kw["chunksizes"] = chunks
                 if dt == np.dtype(np.int8):
                     # Omit _FillValue on int8 category vars so xarray.open_dataset does not upcast int8 -> float.
                     v = ds.createVariable(name, "i1", dims, **kw)
-                    v.missing_value_code = np.int8(CATEGORY_MISSING)
-                    v.description = (
-                        "+1..+4 high Cat I-IV, -1..-4 low Cat I-IV, 0 normal, -128 missing"
-                        if name == "daily_category_ts"
-                        else "Event peak category mapped across event span; -128 missing"
-                    )
                 else:
                     code = "f4" if dt == np.dtype(np.float32) else "f8"
-                    ds.createVariable(name, code, dims, fill_value=fill, **kw)
+                    v = ds.createVariable(name, code, dims, fill_value=fill, **kw)
+                for ak, av in grid_var_attrs(name, units_str).items():
+                    v.setncattr(ak, np.int8(av) if ak == "missing_value_code" else av)
         except BaseException:
             self.close()
             raise
@@ -721,22 +829,22 @@ class _NetCDFWriter:
         for fld in schema:
             name = fld.name
             if name == "event_type":
-                v = grp.createVariable(name, "i1", ("event",), zlib=True, complevel=4)
+                v = grp.createVariable(name, "i1", ("event",), zlib=True, complevel=1)
                 v.description = "+1 = high (MHW), -1 = low (MCS)"
             elif name in DATE_EVENT_COLS:
-                v = grp.createVariable(name, "i4", ("event",), zlib=True, complevel=4)
+                v = grp.createVariable(name, "i4", ("event",), zlib=True, complevel=1)
                 v.format = "YYYYMMDD"
             elif pa.types.is_boolean(fld.type):
-                grp.createVariable(name, "i1", ("event",), zlib=True, complevel=4)
+                grp.createVariable(name, "i1", ("event",), zlib=True, complevel=1)
             elif pa.types.is_string(fld.type) or pa.types.is_large_string(fld.type):
                 max_b = self._str_coord_max_bytes.get(name, 256)
                 self._ev_str_max_bytes[name] = max_b
                 sdim = f"{name}_ev_strlen"
                 grp.createDimension(sdim, max_b)
-                v = grp.createVariable(name, "S1", ("event", sdim), zlib=True, complevel=4)
+                v = grp.createVariable(name, "S1", ("event", sdim), zlib=True, complevel=1)
                 v._Encoding = "utf-8"
             else:
-                grp.createVariable(name, fld.type.to_pandas_dtype(), ("event",), zlib=True, complevel=4)
+                grp.createVariable(name, fld.type.to_pandas_dtype(), ("event",), zlib=True, complevel=1)
 
     def write_grid_tile(self, name: str, tile: SpatialTile, data: np.ndarray, extra_ndims: int) -> None:
         assert self._ds is not None
@@ -789,8 +897,8 @@ class _NetCDFWriter:
             if self._ev_grp is None and schema is not None:
                 self._init_events_group(schema)
             if self._ev_grp is not None:
-                self._ev_grp.createDimension("grid_offset", int(grid_offsets.shape[0]))
-                self._ev_grp.createVariable("grid_offsets", "i8", ("grid_offset",), zlib=True, complevel=4)[:] = grid_offsets
+                self._ev_grp.createDimension("grid_offsets", int(grid_offsets.shape[0]))
+                self._ev_grp.createVariable("grid_offsets", "i8", ("grid_offsets",), zlib=True, complevel=1)[:] = grid_offsets
         self._ds.close()
         self._ds = None
         self._ev_grp = None
@@ -966,7 +1074,7 @@ def _write_mat_v73_dataset(
     if eff_dt == np.dtype(np.bool_) and a2.dtype != np.dtype(np.uint8):
         a2 = a2.astype(np.uint8, copy=False)
     ds = (
-        parent.create_dataset(name, data=a2, compression="gzip", compression_opts=4)
+        parent.create_dataset(name, data=a2, compression="gzip", compression_opts=1)
         if (compress and a2.size >= 16)
         else parent.create_dataset(name, data=a2)
     )
@@ -1070,7 +1178,7 @@ class _MatV73Writer:
                         dtype=dt,
                         chunks=h5_chunks,
                         compression="gzip",
-                        compression_opts=4,
+                        compression_opts=1,
                         fillvalue=fill,
                     )
                 _tag_matlab_dataset(ds, dt)
@@ -1115,7 +1223,7 @@ class _MatV73Writer:
                 dt = tag_dt = np.dtype(fld.type.to_pandas_dtype())
             ds = grp.create_dataset(
                 name, shape=(1, 0), maxshape=(1, None), chunks=(1, 4096),
-                dtype=dt, compression="gzip", compression_opts=4,
+                dtype=dt, compression="gzip", compression_opts=1,
             )
             _tag_matlab_dataset(ds, tag_dt)
             self._ev_field_dtypes[name] = tag_dt
@@ -1304,13 +1412,16 @@ class _MatV73Adapter:
 
                 clim_dims = (*spatial_dims, "year", "doy") if has_mov else (*spatial_dims, "doy")
                 ts_dims = (*spatial_dims, time_dim)
+                units_str = str(metadata.get("units", "")).strip()
                 data_vars: dict[str, xr.DataArray] = {}
                 for names, dims in ((CLIM_VAR_NAMES, clim_dims), (TS_VAR_NAMES, ts_dims), (TREND_VAR_NAMES, spatial_dims)):
                     for vname in names:
                         if vname in f:
                             logical_shape = tuple(int(len(coords[d])) for d in dims)
                             lazy = indexing.LazilyIndexedArray(_H5TransposedBackendArray(f[vname], logical_shape))
-                            data_vars[vname] = xr.DataArray(lazy, dims=dims, name=vname)
+                            data_vars[vname] = xr.DataArray(
+                                lazy, dims=dims, name=vname, attrs=grid_var_attrs(vname, units_str)
+                            )
                 grids_ds = xr.Dataset(data_vars, coords=coords)
         except BaseException:
             try:
@@ -1365,10 +1476,16 @@ class _ZarrWriter:
                 if spec.has_ts:
                     coords[spec.time_dim] = coerce_time_for_zarr(spec.det_time)
 
+                units_str = str(spec.attrs.get("units", "")).strip()
                 data_vars: dict[str, xr.DataArray] = {}
                 for name, dims, shape, dt, fill in spec.grid_var_specs():
                     chunks = _compute_bounded_chunks(shape, dt.itemsize) if shape else ()
-                    data_vars[name] = xr.DataArray(da_mod.full(shape, fill, chunks=chunks, dtype=dt), dims=dims, name=name)
+                    data_vars[name] = xr.DataArray(
+                        da_mod.full(shape, fill, chunks=chunks, dtype=dt),
+                        dims=dims,
+                        name=name,
+                        attrs=grid_var_attrs(name, units_str),
+                    )
                 xr.Dataset(data_vars, coords=coords, attrs=safe_attrs).to_zarr(
                     self._tmp_path, compute=False, mode="w", consolidated=False
                 )
@@ -1673,6 +1790,9 @@ class _MatDetectcWriter(_BufferedGridWriter):
         for src_k, dst_k in rename.items():
             if src_k in self._grids:
                 payload[dst_k] = self._grids[src_k]
+        for extra_k in ("intensity_high_ts", "intensity_low_ts"):
+            if extra_k in self._grids:
+                payload[extra_k] = self._grids[extra_k]
         if "event_category_ts" in self._grids:
             payload["category_ts"] = self._grids["event_category_ts"]
             payload["event_category_ts"] = self._grids["event_category_ts"]
@@ -1768,23 +1888,41 @@ class _MatDetectcAdapter:
                 a = a.reshape(())
             return xr.DataArray(a, dims=dims)
 
+        units_str = str(metadata.get("units", "")).strip()
         data_vars: dict[str, xr.DataArray] = {}
         clim_dims = (*spatial_dims, "year", "doy") if has_mov else (*spatial_dims, "doy")
         for mat_k, std_k in (("mclim", "clim"), ("m90", "thresh_high"), ("m10", "thresh_low")):
             if mat_k in mat:
-                data_vars[std_k] = _unwrap_v5(mat[mat_k], clim_dims)
+                da_v = _unwrap_v5(mat[mat_k], clim_dims)
+                da_v.attrs = grid_var_attrs(std_k, units_str)
+                data_vars[std_k] = da_v
         ts_dims = (*spatial_dims, time_dim)
         if "mhw_ts" in mat:
-            data_vars["intensity_ts"] = _unwrap_v5(mat["mhw_ts"], ts_dims)
+            da_v = _unwrap_v5(mat["mhw_ts"], ts_dims)
+            da_v.attrs = grid_var_attrs("intensity_ts", units_str)
+            data_vars["intensity_ts"] = da_v
+        for extra_k in ("intensity_high_ts", "intensity_low_ts"):
+            if extra_k in mat:
+                da_v = _unwrap_v5(mat[extra_k], ts_dims)
+                da_v.attrs = grid_var_attrs(extra_k, units_str)
+                data_vars[extra_k] = da_v
         if "daily_category_ts" in mat and blob.get("has_daily_category_ts", True):
-            data_vars["daily_category_ts"] = _unwrap_v5(mat["daily_category_ts"], ts_dims)
+            da_v = _unwrap_v5(mat["daily_category_ts"], ts_dims)
+            da_v.attrs = grid_var_attrs("daily_category_ts", units_str)
+            data_vars["daily_category_ts"] = da_v
         if "event_category_ts" in mat and blob.get("has_event_category_ts", True):
-            data_vars["event_category_ts"] = _unwrap_v5(mat["event_category_ts"], ts_dims)
+            da_v = _unwrap_v5(mat["event_category_ts"], ts_dims)
+            da_v.attrs = grid_var_attrs("event_category_ts", units_str)
+            data_vars["event_category_ts"] = da_v
         elif "category_ts" in mat and "daily_category_ts" not in data_vars and "event_category_ts" not in data_vars:
-            data_vars["daily_category_ts"] = _unwrap_v5(mat["category_ts"], ts_dims)
+            da_v = _unwrap_v5(mat["category_ts"], ts_dims)
+            da_v.attrs = grid_var_attrs("daily_category_ts", units_str)
+            data_vars["daily_category_ts"] = da_v
         for trname in TREND_VAR_NAMES:
             if trname in mat:
-                data_vars[trname] = _unwrap_v5(mat[trname], spatial_dims)
+                da_v = _unwrap_v5(mat[trname], spatial_dims)
+                da_v.attrs = grid_var_attrs(trname, units_str)
+                data_vars[trname] = da_v
 
         grids_ds = xr.Dataset(data_vars, coords=coords) if data_vars else None
         catalog = None
@@ -1883,6 +2021,7 @@ class _NpzAdapter:
                     str(blob.get("time_calendar", "proleptic_gregorian")),
                 )
 
+            units_str = str(metadata.get("units", "")).strip()
             clim_dims = (*spatial_dims, "year", "doy") if has_mov else (*spatial_dims, "doy")
             ts_dims = (*spatial_dims, time_dim)
             data_vars: dict[str, xr.DataArray] = {}
@@ -1892,7 +2031,7 @@ class _NpzAdapter:
                         arr = np.asarray(npz[vname])
                         if not dims:
                             arr = arr.reshape(())
-                        data_vars[vname] = xr.DataArray(arr, dims=dims, name=vname)
+                        data_vars[vname] = xr.DataArray(arr, dims=dims, name=vname, attrs=grid_var_attrs(vname, units_str))
             grids_ds = xr.Dataset(data_vars, coords=coords) if data_vars else None
 
             catalog = None
@@ -2241,6 +2380,8 @@ class _BaseResultSink:
         thresh_high: np.ndarray | None = None,
         thresh_low: np.ndarray | None = None,
         intensity_ts: np.ndarray | None = None,
+        intensity_high_ts: np.ndarray | None = None,
+        intensity_low_ts: np.ndarray | None = None,
         daily_category_ts: np.ndarray | None = None,
         event_category_ts: np.ndarray | None = None,
         trend: np.ndarray | None = None,
@@ -2273,6 +2414,8 @@ class _BaseResultSink:
             thresh_high=thresh_high,
             thresh_low=thresh_low,
             intensity_ts=intensity_ts,
+            intensity_high_ts=intensity_high_ts,
+            intensity_low_ts=intensity_low_ts,
             daily_category_ts=daily_category_ts,
             event_category_ts=event_category_ts,
             trend=trend,
@@ -2307,10 +2450,12 @@ class InMemoryResultSink(_BaseResultSink):
             else (n_pix, spec.year_len)
         )
         self._events: list[pa.Table] = []
-        self._clim = np.full(c_shape, np.nan, dtype=np.float64) if spec.write_clim else None
-        self._hi = np.full(c_shape, np.nan, dtype=np.float64) if spec.write_thresh_high else None
-        self._lo = np.full(c_shape, np.nan, dtype=np.float64) if spec.write_thresh_low else None
+        self._clim = np.full(c_shape, np.nan, dtype=spec.clim_dtype) if spec.write_clim else None
+        self._hi = np.full(c_shape, np.nan, dtype=spec.clim_dtype) if spec.write_thresh_high else None
+        self._lo = np.full(c_shape, np.nan, dtype=spec.clim_dtype) if spec.write_thresh_low else None
         self._int = np.full((n_pix, n_det), np.nan, dtype=spec.intensity_dtype) if spec.write_intensity_ts else None
+        self._int_hi = np.full((n_pix, n_det), np.nan, dtype=spec.intensity_dtype) if spec.write_intensity_high_ts else None
+        self._int_lo = np.full((n_pix, n_det), np.nan, dtype=spec.intensity_dtype) if spec.write_intensity_low_ts else None
         self._dcat = np.full((n_pix, n_det), CATEGORY_MISSING, dtype=np.int8) if spec.write_daily_category_ts else None
         self._ecat = np.full((n_pix, n_det), CATEGORY_MISSING, dtype=np.int8) if spec.write_event_category_ts else None
         self._trend = np.full((n_pix, 3), np.nan, dtype=np.float64) if spec.write_trend else None
@@ -2329,6 +2474,8 @@ class InMemoryResultSink(_BaseResultSink):
             (self._hi, arrays.get("thresh_high")),
             (self._lo, arrays.get("thresh_low")),
             (self._int, arrays.get("intensity_ts")),
+            (self._int_hi, arrays.get("intensity_high_ts")),
+            (self._int_lo, arrays.get("intensity_low_ts")),
             (self._dcat, arrays.get("daily_category_ts")),
             (self._ecat, arrays.get("event_category_ts")),
             (self._trend, arrays.get("trend")),
@@ -2357,14 +2504,18 @@ class InMemoryResultSink(_BaseResultSink):
             else {**sp_coords, "doy": doy_coord}
         )
         ts_coords = {**sp_coords, spec.time_dim: spec.det_time}
+        units_str = str(spec.attrs.get("units", "")).strip()
 
-        def _da(buf: np.ndarray | None, name: str, dims: tuple[str, ...], shape: tuple[int, ...], coords: dict[str, Any], attrs: dict[str, Any] | None = None) -> xr.DataArray | None:
-            return xr.DataArray(buf.reshape(shape), dims=dims, coords=coords, name=name, attrs=attrs or {}) if buf is not None else None
+        def _da(buf: np.ndarray | None, name: str, dims: tuple[str, ...], shape: tuple[int, ...], coords: dict[str, Any]) -> xr.DataArray | None:
+            return xr.DataArray(buf.reshape(shape), dims=dims, coords=coords, name=name, attrs=grid_var_attrs(name, units_str)) if buf is not None else None
 
         trend_ds = None
         if self._trend is not None:
             trend_ds = xr.Dataset(
-                {short: (spec.spatial_dims, self._trend[:, i].reshape(spec.spatial_shape)) for i, (short, _) in enumerate(TREND_VAR_KEYS)},
+                {
+                    short: (spec.spatial_dims, self._trend[:, i].reshape(spec.spatial_shape), grid_var_attrs(full_name, units_str))
+                    for i, (short, full_name) in enumerate(TREND_VAR_KEYS)
+                },
                 coords=sp_coords,
             )
 
@@ -2373,18 +2524,11 @@ class InMemoryResultSink(_BaseResultSink):
             clim=_da(self._clim, "clim", spec.clim_dims, spec.clim_shape, clim_coords),
             thresh_high=_da(self._hi, "thresh_high", spec.clim_dims, spec.clim_shape, clim_coords),
             thresh_low=_da(self._lo, "thresh_low", spec.clim_dims, spec.clim_shape, clim_coords),
-            intensity_ts=_da(
-                self._int, "intensity_ts", spec.ts_dims, spec.ts_shape, ts_coords,
-                {"description": "0.0 = non-event valid ocean; NaN = land/missing"},
-            ),
-            daily_category_ts=_da(
-                self._dcat, "daily_category_ts", spec.ts_dims, spec.ts_shape, ts_coords,
-                {"missing_value_code": CATEGORY_MISSING, "description": "+1..+4 high Cat I-IV, -1..-4 low Cat I-IV, 0 normal, -128 missing"},
-            ),
-            event_category_ts=_da(
-                self._ecat, "event_category_ts", spec.ts_dims, spec.ts_shape, ts_coords,
-                {"missing_value_code": CATEGORY_MISSING, "description": "Event peak category mapped across event span; -128 missing"},
-            ),
+            intensity_ts=_da(self._int, "intensity_ts", spec.ts_dims, spec.ts_shape, ts_coords),
+            intensity_high_ts=_da(self._int_hi, "intensity_high_ts", spec.ts_dims, spec.ts_shape, ts_coords),
+            intensity_low_ts=_da(self._int_lo, "intensity_low_ts", spec.ts_dims, spec.ts_shape, ts_coords),
+            daily_category_ts=_da(self._dcat, "daily_category_ts", spec.ts_dims, spec.ts_shape, ts_coords),
+            event_category_ts=_da(self._ecat, "event_category_ts", spec.ts_dims, spec.ts_shape, ts_coords),
             trend=trend_ds,
             metadata=dict(spec.attrs),
         )
@@ -2426,15 +2570,18 @@ class FileResultSink(_BaseResultSink):
             full[active_local] = val.astype(dtype, copy=False) if val.dtype != np.dtype(dtype) else val
             assert self._writer is not None
             self._writer.write_grid_tile(name, tile, full.reshape((*tile.tile_shape, *extra_shape)), len(extra_shape))
+            del full
 
-        _scatter_write("clim", arrays.get("clim"), spec.write_clim, clim_extra_shape, np.float64, np.nan)
-        _scatter_write("thresh_high", arrays.get("thresh_high"), spec.write_thresh_high, clim_extra_shape, np.float64, np.nan)
-        _scatter_write("thresh_low", arrays.get("thresh_low"), spec.write_thresh_low, clim_extra_shape, np.float64, np.nan)
+        _scatter_write("clim", arrays.pop("clim", None), spec.write_clim, clim_extra_shape, spec.clim_dtype, np.nan)
+        _scatter_write("thresh_high", arrays.pop("thresh_high", None), spec.write_thresh_high, clim_extra_shape, spec.clim_dtype, np.nan)
+        _scatter_write("thresh_low", arrays.pop("thresh_low", None), spec.write_thresh_low, clim_extra_shape, spec.clim_dtype, np.nan)
         n_det = int(spec.det_time.shape[0])
-        _scatter_write("intensity_ts", arrays.get("intensity_ts"), spec.write_intensity_ts, (n_det,), spec.intensity_dtype, np.nan)
-        _scatter_write("daily_category_ts", arrays.get("daily_category_ts"), spec.write_daily_category_ts, (n_det,), np.int8, CATEGORY_MISSING)
-        _scatter_write("event_category_ts", arrays.get("event_category_ts"), spec.write_event_category_ts, (n_det,), np.int8, CATEGORY_MISSING)
-        trend_arr = arrays.get("trend")
+        _scatter_write("intensity_ts", arrays.pop("intensity_ts", None), spec.write_intensity_ts, (n_det,), spec.intensity_dtype, np.nan)
+        _scatter_write("intensity_high_ts", arrays.pop("intensity_high_ts", None), spec.write_intensity_high_ts, (n_det,), spec.intensity_dtype, np.nan)
+        _scatter_write("intensity_low_ts", arrays.pop("intensity_low_ts", None), spec.write_intensity_low_ts, (n_det,), spec.intensity_dtype, np.nan)
+        _scatter_write("daily_category_ts", arrays.pop("daily_category_ts", None), spec.write_daily_category_ts, (n_det,), np.int8, CATEGORY_MISSING)
+        _scatter_write("event_category_ts", arrays.pop("event_category_ts", None), spec.write_event_category_ts, (n_det,), np.int8, CATEGORY_MISSING)
+        trend_arr = arrays.pop("trend", None)
         if spec.write_trend and trend_arr is not None:
             for ci, tname in enumerate(TREND_VAR_NAMES):
                 _scatter_write(tname, trend_arr[:, ci], True, (), np.float64, np.nan)

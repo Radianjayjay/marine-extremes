@@ -19,6 +19,9 @@ identifiers:
   - type: doi
     value: "10.5281/zenodo.24579204"
     description: "Zenodo DOI for v0.1.0"
+  - type: doi
+    value: "10.5281/zenodo.24627390"
+    description: "Zenodo DOI for v0.1.1"
 abstract: >-
   Rust-accelerated Python package for detecting marine heatwaves (MHWs),
   marine cold spells (MCSs), and general scalar marine extremes across 1D-4D
@@ -33,7 +36,7 @@ keywords:
   - xarray
   - netcdf
 license: MIT
-version: "0.1.1"
+version: "0.1.2"
 date-released: "2026-11-28"
 contact:
   - family-names: "Ren"

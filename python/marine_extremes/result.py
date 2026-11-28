@@ -21,6 +21,8 @@ class DetectResult:
     thresh_high: xr.DataArray | None = None
     thresh_low: xr.DataArray | None = None
     intensity_ts: xr.DataArray | None = None
+    intensity_high_ts: xr.DataArray | None = None
+    intensity_low_ts: xr.DataArray | None = None
     daily_category_ts: xr.DataArray | None = None
     event_category_ts: xr.DataArray | None = None
     trend: xr.Dataset | None = None
@@ -51,6 +53,8 @@ class DetectResult:
                 "thresh_high",
                 "thresh_low",
                 "intensity_ts",
+                "intensity_high_ts",
+                "intensity_low_ts",
                 "daily_category_ts",
                 "event_category_ts",
                 "trend",
@@ -68,6 +72,8 @@ class DetectResult:
             "thresh_high",
             "thresh_low",
             "intensity_ts",
+            "intensity_high_ts",
+            "intensity_low_ts",
             "daily_category_ts",
             "event_category_ts",
         ):
@@ -118,17 +124,21 @@ class DetectResult:
         grid_offsets = self.events.grid_offsets.copy() if self.events is not None else None
 
         writer = open_file_writer(out_file, fmt, spec)
+        n_int_arrays = sum(1 for v in (self.intensity_ts, self.intensity_high_ts, self.intensity_low_ts) if v is not None)
         max_tile = (
             estimate_max_tile_pixels(
                 parse_memory_limit("512MB"),
                 0,
                 int(spec.det_time.size),
-                return_intensity_ts=spec.write_intensity_ts,
+                return_clim=spec.has_clim,
+                return_intensity_ts=n_int_arrays > 0,
                 return_daily_category_ts=spec.write_daily_category_ts,
                 return_event_category_ts=spec.write_event_category_ts,
                 moving_n_years=int(spec.moving_years.size) if spec.moving_years is not None else 0,
                 year_len=spec.year_len,
+                clim_itemsize=spec.clim_dtype.itemsize,
                 intensity_itemsize=spec.intensity_dtype.itemsize,
+                n_intensity_arrays=n_int_arrays,
             )
             if spec.spatial_dims
             else 1
@@ -160,6 +170,16 @@ class DetectResult:
         """Export a single standalone MATLAB ``.mat`` file (``'v73'`` default or ``'detectc'`` v5)."""
         return self.save(path, out_format="mat", mat_layout=layout)
 
+    def summary(self, *, chunk_rows: int = 200_000) -> dict[str, Any]:
+        """Return bounded-chunk summary metrics without loading the full catalog into memory."""
+        if self.events is None:
+            raise ValueError("DetectResult contains no event catalog.")
+        return {
+            "out_path": str(self.out_path) if self.out_path is not None else None,
+            "metadata": dict(self.metadata),
+            **self.events.summary(chunk_rows=chunk_rows),
+        }
+
     @classmethod
     def open(cls, path: str | Path, events_in_memory: bool = False) -> "DetectResult":
         """Reopen any self-contained ``marine-extremes`` output."""
@@ -182,6 +202,8 @@ class DetectResult:
             thresh_high=_get("thresh_high"),
             thresh_low=_get("thresh_low"),
             intensity_ts=_get("intensity_ts"),
+            intensity_high_ts=_get("intensity_high_ts"),
+            intensity_low_ts=_get("intensity_low_ts"),
             daily_category_ts=_get("daily_category_ts"),
             event_category_ts=_get("event_category_ts"),
             trend=xr.Dataset(trend_vars) if trend_vars else None,

@@ -16,7 +16,7 @@ from marine_extremes.result import DetectResult
 # Top-level convenience alias for reopening any self-contained marine-extremes output.
 open = DetectResult.open
 
-__version__ = "0.1.1"
+__version__ = "0.1.2"
 
 __all__ = [
     "__version__",

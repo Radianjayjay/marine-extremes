@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections import Counter
 import datetime as dt
 import functools
 import math
@@ -135,10 +134,19 @@ def inspect_dataset(
             time_range: dict[str, Any] | None = None
             if t_obj is not None and t_obj in target.coords:
                 try:
-                    cal = encode_time_axis(target.coords[t_obj])
+                    try:
+                        cal = encode_time_axis(target.coords[t_obj])
+                    except ValueError as exc:
+                        if "same calendar day" not in str(exc):
+                            raise
+                        cal = encode_time_axis(target.coords[t_obj], check_freq_unique=False)
+                        tips.append(
+                            f"Time coordinate '{resolved_t}' has sub-daily steps (multiple timestamps per day); "
+                            "resample to daily before detect_extremes(freq='daily')."
+                        )
                     time_range = {
-                        "start": _to_jsonable(cal.raw_time[0]),
-                        "end": _to_jsonable(cal.raw_time[-1]),
+                        "start": _to_jsonable(cal.raw_time[0]) if cal.raw_time.size > 0 else None,
+                        "end": _to_jsonable(cal.raw_time[-1]) if cal.raw_time.size > 0 else None,
                         "n_steps": int(cal.raw_time.size),
                         "calendar": cal.calendar,
                     }
@@ -255,39 +263,40 @@ def _slice_region(da: xr.DataArray, region: dict[str, list[float]], *, time_dim:
 def detect_extremes(
     path: Annotated[str, _Field(description="Input NetCDF/Zarr file, directory, or glob pattern.")],
     out: Annotated[str, _Field(description="Single output target (.nc, .mat, .zarr, .npz, .parquet, .feather, .csv). Must not overlap `path`.")],
-    var: Annotated[str | None, _Field(description="Variable name, CF standard_name, or marine alias; required if multi-variable.")] = None,
-    time_dim: Annotated[str | None, _Field(description="Time dimension name or 'auto'.")] = "auto",
-    squeeze_singleton: Annotated[bool | str | list[str], _Field(description="Length-1 spatial dim(s) to squeeze (e.g., True or 'zlev').")] = False,
-    event: Annotated[Literal["high", "low", "both", "mhw", "mcs"], _Field(description="Event direction: 'high'/'mhw', 'low'/'mcs', or 'both'.")] = "both",
+    var: Annotated[str | None, _Field(description="Variable name (e.g., 'sst', 'thetao', 'so', 'ph', 'o2', 'spco2'), CF standard_name, or marine alias; required if multi-variable.")] = None,
+    time_dim: Annotated[str | None, _Field(description="Time dimension name or 'auto' for CF inference.")] = "auto",
+    squeeze_singleton: Annotated[bool | str | list[str], _Field(description="Length-1 spatial dim(s) to drop (e.g., True or 'zlev').")] = False,
+    event: Annotated[Literal["high", "low", "both", "mhw", "mcs"], _Field(description="Detection direction across temperature, salinity, pH, oxygen, CO2/pCO2, and chlorophyll: 'high' ('mhw'), 'low' ('mcs', negative intensities), or 'both'.")] = "both",
     baseline_type: Annotated[Literal["fixed", "detrended_linear", "detrended_quadratic", "moving", "fixed_threshold"], _Field(description="Climatology baseline mode.")] = "fixed",
     baseline_start: Annotated[str | int | None, _Field(description="Inclusive baseline start year or ISO date (e.g., '1982-01-01').")] = None,
     baseline_end: Annotated[str | int | None, _Field(description="Inclusive baseline end year or ISO date (e.g., '2011-12-31').")] = None,
-    moving_window_years: int = 31,
-    moving_center: bool = True,
-    moving_boundary: Annotated[Literal["clamp", "shrink"], _Field(description="Edge policy for 'moving' baseline windows.")] = "clamp",
-    threshold_high: float | None = None,
-    threshold_low: float | None = None,
-    threshold_climatology: float = 0.0,
-    detect_start: Annotated[str | int | None, _Field(description="Inclusive detection start year or ISO date.")] = None,
-    detect_end: Annotated[str | int | None, _Field(description="Inclusive detection end year or ISO date.")] = None,
-    pctile_high: float | None = 0.90,
-    pctile_low: float | None = 0.10,
-    freq: Annotated[Literal["daily", "monthly"], _Field(description="Input temporal frequency.")] = "daily",
-    min_duration: int | None = None,
-    max_gap: int | None = None,
-    max_pad_length: int = 0,
-    min_valid_fraction: float = 0.0,
-    lower_bound: Annotated[float | None, _Field(description="Physical lower bound (e.g., -1.8 degC or 271.35 K for sea-ice freezing limit).")] = None,
-    bound_policy: Annotated[Literal["flag", "mask", "floor"], _Field(description="Action when values fall at/below `lower_bound`.")] = "flag",
-    compat: Annotated[Literal["standard", "m_mhw", "m_mhw_python", "oliver", "heatwaveR"], _Field(description="Cross-tool numerical compatibility preset.")] = "standard",
-    memory_limit: Annotated[str, _Field(description="Tile memory budget (e.g., '4GB', '512MB').")] = "4GB",
-    working_dtype: Annotated[Literal["auto", "float32", "float64"], _Field(description="Working tile precision for detection compute.")] = "auto",
-    intensity_dtype: Annotated[Literal["float32", "float64"], _Field(description="Storage dtype for daily intensity_ts output.")] = "float32",
-    mat_layout: Annotated[Literal["v73", "detectc"], _Field(description="MATLAB .mat output layout when `out` ends with .mat.")] = "v73",
+    moving_window_years: Annotated[int, _Field(description="Sliding window width in years when `baseline_type='moving'` (e.g., 11 or 31).")] = 31,
+    moving_center: Annotated[bool, _Field(description="Center sliding `moving` window symmetrically on each year (False uses trailing window).")] = True,
+    moving_boundary: Annotated[Literal["clamp", "shrink"], _Field(description="Edge policy for `moving` baseline windows ('clamp' keeps constant width).")] = "clamp",
+    threshold_high: Annotated[float | None, _Field(description="Constant upper threshold used when `baseline_type='fixed_threshold'`.")] = None,
+    threshold_low: Annotated[float | None, _Field(description="Constant lower threshold used when `baseline_type='fixed_threshold'`.")] = None,
+    threshold_climatology: Annotated[float, _Field(description="Reference climatology scalar used with `baseline_type='fixed_threshold'`.")] = 0.0,
+    detect_start: Annotated[str | int | None, _Field(description="Inclusive detection start year or ISO date (defaults to full series).")] = None,
+    detect_end: Annotated[str | int | None, _Field(description="Inclusive detection end year or ISO date (defaults to full series).")] = None,
+    pctile_high: Annotated[float | None, _Field(description="Upper percentile threshold in [0, 1] or (1, 100] (e.g., 0.90 or 90).")] = 0.90,
+    pctile_low: Annotated[float | None, _Field(description="Lower percentile threshold in [0, 1] or (1, 100] (e.g., 0.10 or 10).")] = 0.10,
+    freq: Annotated[Literal["daily", "monthly"], _Field(description="Temporal frequency: 'daily' (Hobday 2016) or 'monthly' (Jacox 2020).")] = "daily",
+    min_duration: Annotated[int | None, _Field(description="Minimum consecutive exceeding steps per event (None -> 5 daily, 1 monthly).")] = None,
+    max_gap: Annotated[int | None, _Field(description="Max non-exceeding gap merged between qualifying runs (None -> 2 daily, 0 monthly).")] = None,
+    max_pad_length: Annotated[int, _Field(description="Max internal NaN gap linearly interpolated during event detection only (0 disables).")] = 0,
+    min_valid_fraction: Annotated[float, _Field(description="Minimum finite sample fraction (0.0..1.0) per DOY pool (e.g., 0.5 near sea ice).")] = 0.0,
+    lower_bound: Annotated[float | None, _Field(description="Physical lower limit in data units (e.g., -1.8 degC / 271.35 K seawater freezing point, 0.0 salinity/O2).")] = None,
+    bound_policy: Annotated[Literal["flag", "mask", "floor"], _Field(description="Handling when values reach `lower_bound`: 'flag', 'mask', or 'floor'.")] = "flag",
+    compat: Annotated[Literal["standard", "m_mhw", "m_mhw_python", "oliver", "heatwaveR"], _Field(description="Cross-tool numerical convention preset.")] = "standard",
+    memory_limit: Annotated[str, _Field(description="Memory budget (e.g., '4GB' or '8GB' tiled streaming; '10GB' enables single-pass pre-read on ~4 GB inputs).")] = "4GB",
+    working_dtype: Annotated[Literal["auto", "float32", "float64"], _Field(description="Working tile precision passed to Rust ('auto' uses compact float32 tiles when applicable).")] = "auto",
+    clim_dtype: Annotated[Literal["float32", "float64"], _Field(description="Storage dtype for clim/thresh grids ('float32' halves 4D MovingBaseline size; prefer .zarr for fastest 4D writes).")] = "float64",
+    intensity_dtype: Annotated[Literal["float32", "float64"], _Field(description="Storage dtype for Hobday intensity anomaly grids (intensity_ts, intensity_high_ts, intensity_low_ts).")] = "float32",
+    mat_layout: Annotated[Literal["v73", "detectc"], _Field(description="MATLAB .mat layout when `out` ends with .mat ('v73' streams >2 GB with CSR lookup).")] = "v73",
     region: Annotated[dict[str, list[float]] | None, _Field(description="Optional 1D spatial subset mapping dim -> [min, max], e.g. {'lat': [-35, -25], 'lon': [145, 160]}.")] = None,
     sample_limit: Annotated[int, _Field(description="Maximum sample event rows returned in response (0..50).")] = 10,
 ) -> dict[str, Any]:
-    """Detect MHW/MCS/marine extreme events, write one self-contained file to ``out``, and return a compact summary."""
+    """Detect high/low marine extremes (temperature MHW/MCS, salinity, pH, O2, CO2, etc.), write one self-contained file to ``out``, and return a compact summary."""
     if int(sample_limit) < 0:
         raise ValueError(f"sample_limit must be >= 0, got {sample_limit}")
     base = _build_baseline(
@@ -320,7 +329,7 @@ def detect_extremes(
                     pctile_low=pctile_low, freq=freq, min_duration=min_duration, max_gap=max_gap,
                     max_pad_length=max_pad_length, min_valid_fraction=min_valid_fraction,
                     lower_bound=lower_bound, bound_policy=bound_policy, compat=compat,
-                    working_dtype=working_dtype, intensity_dtype=intensity_dtype,
+                    working_dtype=working_dtype, clim_dtype=clim_dtype, intensity_dtype=intensity_dtype,
                     memory_limit=memory_limit, out=out, mat_layout=mat_layout,
                 )
 
@@ -374,13 +383,13 @@ def query_events(
     result_path: Annotated[str, _Field(description="Saved marine-extremes output file (.nc, .mat, .zarr, .npz, .parquet, .feather, .csv).")],
     coords: Annotated[dict[str, Any] | None, _Field(description="Physical coordinates per spatial dim for O(1) CSR lookup (nearest match for numeric coords, exact for string coords; e.g., {'lat': -30.0, 'lon': 150.0}).")] = None,
     indices: Annotated[dict[str, int] | None, _Field(description="Zero-based integer indices per spatial dim for O(1) CSR lookup.")] = None,
-    event_type: Annotated[Literal["high", "low", "mhw", "mcs", "both"] | None, _Field(description="Filter by event direction ('high'/'mhw', 'low'/'mcs', or 'both').")] = None,
-    min_duration: int | None = None,
-    min_category: int | None = None,
+    event_type: Annotated[Literal["high", "low", "mhw", "mcs", "both"] | None, _Field(description="Filter by event direction: 'high'/'mhw' (upper extremes, positive intensity), 'low'/'mcs' (lower extremes such as cold spells, low pH, hypoxia, low salinity; negative intensity), or 'both'.")] = None,
+    min_duration: Annotated[int | None, _Field(description="Minimum event duration in time steps.")] = None,
+    min_category: Annotated[int | None, _Field(description="Minimum Hobday peak category (1..4).")] = None,
     start_date: Annotated[str | int | None, _Field(description="Inclusive lower bound on `date_start` (YYYY, YYYY-MM, or YYYY-MM-DD).")] = None,
     end_date: Annotated[str | int | None, _Field(description="Inclusive upper bound on `date_start` (YYYY, YYYY-MM, or YYYY-MM-DD).")] = None,
-    sort_by: Annotated[str | None, _Field(description="Optional event column name to sort results by (e.g., 'duration', 'int_max').")] = None,
-    descending: bool = True,
+    sort_by: Annotated[str | None, _Field(description="Column name to sort by (intensity cols are negative for 'low'/'mcs'; magnitudes stay positive).")] = None,
+    descending: Annotated[bool, _Field(description="Sort descending (default True for 'high'; set False to rank strongest negative 'low'/'mcs' events first).")] = True,
     limit: Annotated[int, _Field(description="Maximum event rows returned (0..500; 0 returns matched count only).")] = 50,
 ) -> dict[str, Any]:
     """Query events from a saved result by O(1) grid coordinate/index or bounded chunked filtering."""
@@ -457,60 +466,19 @@ def summarize_result(
     with _MCP_IO_LOCK:
         res = mx.open(result_path)
         try:
-            ev = res.events
-            if ev is None:
-                raise ValueError(f"Result file '{result_path}' contains no event catalog.")
-
-            cmap = np.asarray(ev.count_map().values)
-            by_type: Counter[str] = Counter()
-            by_cat: Counter[int] = Counter()
-            by_year: Counter[int] = Counter()
-            dur_min: int | None = None
-            dur_max: int | None = None
-            dur_sum, n_total = 0, len(ev)
-            max_abs_int: float | None = None
-
-            for chunk in ev.iter_chunks():
-                df = chunk.to_pandas()
-                if df.empty:
-                    continue
-                vc = df["event_type"].astype(str).value_counts()
-                by_type.update(dict(zip(vc.index.tolist(), vc.to_numpy().tolist())))
-                for counter, arr in (
-                    (by_cat, df["category_max"].to_numpy()),
-                    (by_year, dates_to_yyyymmdd(df["date_start"]) // 10000),
-                ):
-                    vals, cnts = np.unique(arr, return_counts=True)
-                    counter.update(dict(zip(vals.tolist(), cnts.tolist())))
-
-                durs = df["duration"].to_numpy()
-                dur_min = int(np.min(durs)) if dur_min is None else min(dur_min, int(np.min(durs)))
-                dur_max = int(np.max(durs)) if dur_max is None else max(dur_max, int(np.max(durs)))
-                dur_sum += int(np.sum(durs))
-
-                abs_vals = np.abs(df["int_max"].to_numpy(dtype=np.float64))
-                fin = abs_vals[np.isfinite(abs_vals)]
-                if fin.size > 0:
-                    abs_i = float(np.max(fin))
-                    max_abs_int = abs_i if max_abs_int is None else max(max_abs_int, abs_i)
-
+            summary = res.summary()
             return {
                 "result_path": str(result_path),
-                "metadata": _to_jsonable(res.metadata),
-                "spatial_dims": list(ev.spatial_dims),
-                "spatial_shape": list(ev.spatial_shape),
-                "n_events": n_total,
-                "spatial_counts": {
-                    "n_pixels": int(cmap.size),
-                    "pixels_with_events": int(np.count_nonzero(cmap)),
-                    "max_events_per_pixel": int(np.max(cmap)) if cmap.size else 0,
-                    "mean_events_per_pixel": float(np.mean(cmap)) if cmap.size else 0.0,
-                },
-                "by_event_type": dict(by_type),
-                "by_category_max": {str(k): by_cat[k] for k in sorted(by_cat)},
-                "by_start_year": {str(k): by_year[k] for k in sorted(by_year)},
-                "duration": {"min": dur_min, "mean": (dur_sum / n_total) if n_total > 0 else None, "max": dur_max},
-                "max_abs_intensity": _to_jsonable(max_abs_int),
+                "metadata": _to_jsonable(summary["metadata"]),
+                "spatial_dims": summary["spatial_dims"],
+                "spatial_shape": summary["spatial_shape"],
+                "n_events": summary["n_events"],
+                "spatial_counts": summary["spatial_counts"],
+                "by_event_type": summary["by_event_type"],
+                "by_category_max": summary["by_category_max"],
+                "by_start_year": summary["by_start_year"],
+                "duration": summary["duration"],
+                "max_abs_intensity": _to_jsonable(summary["max_abs_intensity"]),
             }
         finally:
             res.close()
@@ -558,8 +526,15 @@ def create_mcp_server() -> Any:
     server = server_cls(
         "marine-extremes",
         instructions=(
-            "Detect and query marine heatwaves (MHWs), marine cold spells (MCSs), and scalar marine extremes. "
-            "Always inspect unknown datasets first; write large gridded detections to `out` instead of returning raw arrays."
+            "Detect and summarize upper-tail ('high') and lower-tail ('low') extremes across seawater temperature "
+            "(MHWs/MCSs, aliases 'mhw'/'mcs'), salinity, pH, dissolved oxygen (hypoxia), CO2/pCO2, and chlorophyll. "
+            "Inspect unknown datasets first and write gridded detections to `out`. "
+            "Gridded `intensity_ts`, `intensity_high_ts`, and `intensity_low_ts` store Hobday anomalies (`value - clim`), "
+            "while `int_*_rel_thresh` event columns store threshold exceedance. For 'low' events, intensity metrics and "
+            "gridded category/intensity series are negative (sort ascending to rank strongest), while `int_std`, `int_var`, "
+            "`rate_onset`, `rate_decline`, and `category_max` are positive magnitudes. "
+            "Use `clim_dtype='float32'` (and `.zarr` for fastest writes) on 4D `MovingBaseline`, and avoid multi-decade "
+            "high-resolution global runs over MCP to prevent client timeouts."
         ),
     )
     for fn in (inspect_dataset, detect_extremes, query_events, summarize_result):

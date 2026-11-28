@@ -2,6 +2,22 @@
 
 All notable changes to `marine-extremes` are documented in this file.
 
+## [0.1.2] - 2026-11-28
+
+### Added
+- Direction-specific Hobday intensity grids (`intensity_high_ts` and `intensity_low_ts`) alongside `intensity_ts`, plus CF metadata attributes (`long_name`, `units`, `description`, and `missing_value_code`) across in-memory results and saved `.nc`, `.zarr`, `.mat`, and `.npz` files.
+- `clim_dtype` (`"float64"` or `"float32"`) option on `detect()` and MCP `detect_extremes` to halve disk and RAM usage for 4D `MovingBaseline` climatology and threshold arrays.
+- Bounded-chunk `DetectResult.summary()` and `EventCatalog.summary()` methods, reused by `mcp_server.summarize_result`.
+- Multi-agency timestamp normalization (`datetime64[D|s|ms|us|ns]`, timezone-aware datetimes and 4-/5-digit ISO strings converted to naive UTC, undecoded CF numeric axes, `YYYYMMDD` ints), uniform midnight event dates across formats, Zarr encoding for out-of-range years (`< 1` or `> 9999`), and strict duplicate-day rejection under `freq="daily"`.
+
+### Changed
+- Added single-pass pre-read for file-backed inputs (NetCDF/Zarr) when the raw array fits inside 45% of `memory_limit` (17-18% faster global 1° OISST runs under `memory_limit="10GB"`), 16-row HDF5 chunk alignment, faster zlib/gzip level 1 compression, and cleaned up NetCDF `events/grid_offsets` dimension naming.
+- Updated bilingual READMEs with `v0.1.2` global OISST benchmarks and figures, `SKILL.md` with HPC `glibc < 2.28` `pyarrow<21`, pre-read `memory_limit`, scheduler/SSH node choices, and non-blocking execution rules, and `mcp_server.py` schema descriptions and sub-daily `inspect_dataset` reporting.
+
+### Fixed
+- Preserved CF time `units`/`calendar` attrs when passing an `xr.DataArray` as `time=` alongside a NumPy array.
+- Enforced bounded `chunk_rows` slicing in `MemoryEventStore.iter_chunks()` and `chunk_rows >= 1` validation across memory and disk event stores.
+
 ## [0.1.1] - 2026-11-28
 
 ### Added
