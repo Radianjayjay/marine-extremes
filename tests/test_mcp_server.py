@@ -408,6 +408,40 @@ def test_query_events_and_summarize_edge_cases(tmp_path: Path):
     assert list(mcp_server.summarize_result(str(out_cf))["by_start_year"]) == ["9999", "10000"]
 
 
+def test_multichunk_query_and_summarize_parity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    from marine_extremes.catalog import EventCatalog
+
+    paths = _write_sample_datasets(tmp_path)
+    out_nc = tmp_path / "multi_chunk.nc"
+    det = mcp_server.detect_extremes(str(paths["oisst"]), out=str(out_nc), var="sst", squeeze_singleton="zlev", event="both")
+    assert det["n_events"] >= 20
+
+    ref = (
+        mcp_server.query_events(str(out_nc), event_type="mhw", limit=5),
+        mcp_server.query_events(str(out_nc), sort_by="int_max", descending=True, limit=5),
+        mcp_server.query_events(str(out_nc), event_type="mcs", limit=0),
+        mcp_server.summarize_result(str(out_nc)),
+    )
+
+    orig_iter = EventCatalog.iter_chunks
+    chunk_calls = 0
+
+    def _small_chunks(self: EventCatalog, chunk_rows: int = 200_000):
+        nonlocal chunk_calls
+        for part in orig_iter(self, chunk_rows=3):
+            chunk_calls += 1
+            yield part
+
+    monkeypatch.setattr(EventCatalog, "iter_chunks", _small_chunks)
+    got = (
+        mcp_server.query_events(str(out_nc), event_type="mhw", limit=5),
+        mcp_server.query_events(str(out_nc), sort_by="int_max", descending=True, limit=5),
+        mcp_server.query_events(str(out_nc), event_type="mcs", limit=0),
+        mcp_server.summarize_result(str(out_nc)),
+    )
+    assert chunk_calls >= 12 and got == ref
+
+
 def test_skill_markdown_frontmatter():
     skill_path = Path(__file__).resolve().parents[1] / "skills" / "marine-extremes" / "SKILL.md"
     assert skill_path.is_file()

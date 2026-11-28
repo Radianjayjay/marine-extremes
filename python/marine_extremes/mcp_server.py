@@ -474,9 +474,14 @@ def summarize_result(
                 df = chunk.to_pandas()
                 if df.empty:
                     continue
-                by_type.update(df["event_type"].astype(str))
-                by_cat.update(int(x) for x in df["category_max"].to_numpy())
-                by_year.update(int(x) for x in (dates_to_yyyymmdd(df["date_start"]) // 10000))
+                vc = df["event_type"].astype(str).value_counts()
+                by_type.update(dict(zip(vc.index.tolist(), vc.to_numpy().tolist())))
+                for counter, arr in (
+                    (by_cat, df["category_max"].to_numpy()),
+                    (by_year, dates_to_yyyymmdd(df["date_start"]) // 10000),
+                ):
+                    vals, cnts = np.unique(arr, return_counts=True)
+                    counter.update(dict(zip(vals.tolist(), cnts.tolist())))
 
                 durs = df["duration"].to_numpy()
                 dur_min = int(np.min(durs)) if dur_min is None else min(dur_min, int(np.min(durs)))
