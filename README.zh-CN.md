@@ -9,7 +9,7 @@
 
 [English](README.md) | **简体中文**
 
-`marine-extremes` 是一个用 Rust 加速的 Python 海洋极端事件检测库，用于识别海洋热浪（MHW）、海洋冷事件（MCS）以及盐度异常等通用标量海洋极端事件。它适用于 1D 站点观测、3D 海表网格（NOAA OISST、OSTIA）、4D 带深度维海洋再分析数据（GLORYS、ORAS5、Argo）以及多日历 CMIP6 气候模式数据。
+`marine-extremes` 是一个用 Rust 加速的 Python 海洋极端事件检测库，用于识别海洋热浪（MHW）、海洋冷事件（MCS）以及盐度异常等一般标量海洋极端事件。它适用于 1D 站点观测、3D 海表网格（NOAA OISST、OSTIA）、4D 带深度维海洋再分析数据（GLORYS、ORAS5、Argo）以及多日历 CMIP6 气候模式数据。
 
 架构与模块图示可在浏览器中打开 [docs/marine_extremes_overview.html](docs/marine_extremes_overview.html) 查看。
 
@@ -24,8 +24,8 @@
 - CMIP6 多日历与月尺度模式。支持公历及 `cftime` 日历（`standard`、`proleptic_gregorian`、`noleap`/`365_day`、`360_day`、`all_leap`/`366_day`），也支持 `freq="monthly"` 月尺度检测（Jacox et al., 2020）。
 - 显式跨工具兼容预设。通过 `compat="standard"`、`"m_mhw"`、`"m_mhw_python"`、`"oliver"` 或 `"heatwaveR"` 指定分位数插值、阈值不等号、2 月 29 日插值与方差自由度 `ddof`，与主流工具逐项对齐。
 - 边缘与海冰区保护。支持仅用于检测阶段的 `max_pad_length` 短缺测插值、`min_valid_fraction` 海冰边缘过滤（循环平滑阶段不产生 NaN 渗透）、`truncated_start`/`truncated_end` 截断标记，以及 `lower_bound`（`flag`/`mask`/`floor` 及除零保护）。
-- CF 元数据自动识别。内置轻量 CF 解析器（支持可选 `cf-xarray` 增强），自动推断非 `time` 时间维（如 `valid_time`、`time_counter`、`ocean_time`），过滤 `*_bnds`/`grid_mapping`/`ancillary_variables` 等辅助变量，支持按 `standard_name` 或海洋变量别名选参，并在开尔文/摄氏度与 `lower_bound` 冲突时发出提醒。
-- AI Agent Skill 与 MCP 服务。内置通用 Agent Skill（[skills/marine-extremes/SKILL.md](skills/marine-extremes/SKILL.md)）与可选本地 stdio MCP 服务（`marine-extremes-mcp`，提供 4 个工具），方便在编程 Agent 与 MCP 客户端中通过自然语言调用。
+- CF 元数据自动识别。内置轻量 CF 解析器（可选接入 `cf-xarray`），自动推断非 `time` 时间维（如 `valid_time`、`time_counter`、`ocean_time`），过滤 `*_bnds`/`grid_mapping`/`ancillary_variables` 等辅助变量，支持按 `standard_name` 或海洋变量别名选参，并在开尔文/摄氏度与 `lower_bound` 冲突时发出提醒。
+- AI Agent Skill 与 MCP 服务。附带 Agent Skill（[skills/marine-extremes/SKILL.md](skills/marine-extremes/SKILL.md)）和可选本地 stdio MCP 服务（`marine-extremes-mcp`），提供 `inspect_dataset`、`detect_extremes`、`query_events` 与 `summarize_result` 四个工具。
 
 ## 安装
 
@@ -44,9 +44,9 @@ pip install "marine-extremes[io]"
 - `marine-extremes[netcdf]`：`netCDF4`、`h5netcdf`、`cftime`、`dask`
 - `marine-extremes[mat]`：`h5py`、`scipy`（MATLAB v7.3 与 v5 `.mat`）
 - `marine-extremes[zarr]`：`zarr>=3.0`、`cftime`、`dask`
-- `marine-extremes[cf]`：`cf-xarray`（可选 CF accessor 与自定义准则增强）
+- `marine-extremes[cf]`：`cf-xarray`（可选 CF accessor 与自定义准则支持）
 - `marine-extremes[mcp]`：`mcp`（可选本地 stdio MCP 服务 `marine-extremes-mcp`，供 AI 客户端调用）
-- `marine-extremes[io]`：上述数据后端全集（`netcdf`、`mat`、`zarr`、`cf`）
+- `marine-extremes[io]`：全部 I/O 后端（`netcdf`、`mat`、`zarr`、`cf`，不含 `mcp`）
 - `marine-extremes[dev]`：`pytest`、`maturin`
 
 从源码编译安装（需本机 Rust 工具链）：
@@ -105,16 +105,20 @@ python examples/quickstart.py
 
 ### Agent Skill 与可直接复制的提示词（推荐用于编程 Agent）
 
-对于可运行本地 Python 的编程 Agent（Claude Code、Codex、Cursor、Antigravity、Windsurf、OpenCode 等），安装 `marine-extremes[io]` 并将通用 Skill 文件 [skills/marine-extremes/SKILL.md](skills/marine-extremes/SKILL.md) 放入你的 skills 目录：
+如果编程 Agent 可以运行本地 Python（如 Claude Code、Codex、Cursor、Antigravity、Windsurf、OpenCode），安装 `marine-extremes[io]` 后，把 [skills/marine-extremes/SKILL.md](skills/marine-extremes/SKILL.md) 复制到对应的 skills 目录即可。若未提前指定参数，Skill 会先自动探测数据集，再通过交互式选择题卡片（无弹窗工具时退化为编号文本选项）引导确认 `mx.detect(...)` 配置，包括气候态基线（30 年固定、30/31 年中心滑动、11 年中心滑动或去趋势）、`compat` 口径、物理边界、精度与输出格式，并兼顾海洋数据核对（多变量文件显式指定 `var`、开尔文与摄氏度 `lower_bound` 核对、压缩单长度维和流式落盘）：
 
 ```bash
-# 示例：安装到 Claude Code / Codex 用户级 skills 目录（按实际工具保留对应目录）
+# 从本地仓库复制（按实际使用的工具保留对应目录）
 mkdir -p ~/.claude/skills/marine-extremes ~/.codex/skills/marine-extremes
 cp skills/marine-extremes/SKILL.md ~/.claude/skills/marine-extremes/SKILL.md
 cp skills/marine-extremes/SKILL.md ~/.codex/skills/marine-extremes/SKILL.md
+
+# 若直接通过 PyPI 安装、本地未克隆仓库，可直接下载
+curl -fsSL https://raw.githubusercontent.com/Radianjayjay/marine-extremes/main/skills/marine-extremes/SKILL.md \
+  -o ~/.claude/skills/marine-extremes/SKILL.md
 ```
 
-如果不安装 Skill 文件，也可以直接复制以下独立提示词发送给 AI：
+如果暂不安装 Skill 文件，可以直接把下面这段提示词发给编程 Agent：
 
 ```text
 请使用 Python 库 `marine-extremes`（`import marine_extremes as mx`）对 <数据路径> 识别海洋热浪（MHW）与海洋冷事件（MCS）。
@@ -122,16 +126,19 @@ cp skills/marine-extremes/SKILL.md ~/.codex/skills/marine-extremes/SKILL.md
 大网格务必指定 `out="<输出>.nc"`、`working_dtype="auto"`、`intensity_dtype="float32"`、`memory_limit="4GB"`，单点查表用 `res.events.sel(...)` / `count_map()`。
 ```
 
-启用 Skill（或下方 MCP 服务）后，即可直接用自然语言发起分析，例如：
-- `“帮我先检查 sst.day.mean.*.nc 的变量和单位，再用 1982-2011 基准做 MHW+MCS 双事件检测并保存到 outputs/oisst.nc，最后列出 (-42.5, 148.0) 附近持续时间最长的前 5 个事件。”`
+配好 Skill 或下方 MCP 服务后，可以直接用自然语言提问，例如：
+
+> “帮我先检查 `sst.day.mean.*.nc` 的变量和单位，再用 1982-2011 基准做 MHW+MCS 双事件检测并保存到 `outputs/oisst.nc`，最后列出 (-42.5, 148.0) 附近持续时间最长的前 5 个事件。”
 
 ### 可选本地 stdio MCP 服务（供桌面端/对话式 AI 客户端使用）
+
+安装可选 `mcp` 依赖（兼容 MCP Python SDK v1 与 v2）：
 
 ```bash
 pip install "marine-extremes[io,mcp]"
 ```
 
-在支持 MCP 的客户端（如 Claude Desktop、Cherry Studio 等）中填入以下配置：
+在支持 MCP 的客户端（如 Claude Desktop、Cherry Studio）中填入以下配置：
 
 ```json
 {
@@ -158,12 +165,12 @@ pip install "marine-extremes[io,mcp]"
 
 | MCP 工具 | 用途 |
 | --- | --- |
-| `inspect_dataset` | 在检测前探测变量名、维度坐标、CF 时间日历、单长度维及开尔文/摄氏度提醒。 |
-| `detect_extremes` | 支持固定/去趋势/滑动/物理阈值基线的流式检测，写入单文件 `out` 并返回紧凑摘要与样本行。 |
-| `query_events` | 基于 CSR 索引执行 O(1) `coords`/`indices` 单点查表，或分块条件筛选与 Top-K 排序（不整表加载）。 |
-| `summarize_result` | 汇总像元覆盖率、按事件类型/等级/年份分布、持续时间统计及最大绝对强度。 |
+| `inspect_dataset` | 检测前查看变量名、维度与 1D 坐标范围（提示多维曲线坐标）、CF 时间日历、单长度维，以及开尔文/摄氏度提醒。 |
+| `detect_extremes` | 按固定、去趋势、滑动或物理阈值基线流式检测（支持 1D `region` 区域裁剪），将结果写入单个 `out` 文件，返回紧凑元数据、警告与最多 50 条样本行，并阻止覆盖输入文件或非 Zarr 目录。 |
+| `query_events` | 通过 CSR 索引按 `coords`（数值最近邻或字符串精确匹配）或 `indices` 做 O(1) 单点查表，或按事件类型、持续天数、等级与 `YYYY` / `YYYY-MM` / `YYYY-MM-DD` 日期分块筛选，支持 Top-K 排序（最多返回 500 条）和 `limit=0` 仅计数。 |
+| `summarize_result` | 分块统计像元覆盖率、按事件类型/等级/起始年份分布、持续时间范围与最大绝对强度，不把整张事件表载入内存。 |
 
-注意：全球高分辨率长序列（如 0.25° 全球 OISST/OSTIA）耗时较长，建议优先用 Skill 让 Agent 在后台运行 Python 脚本，避免触发客户端 MCP 工具调用超时。
+`detect_extremes` 会把格点结果写入 `out`，只向模型返回紧凑元数据与样本行，不把原始大数组塞进对话上下文。多年代高分辨率全球数据（如 0.25° OISST 或 OSTIA）耗时较长，建议通过 Skill 运行 Python 脚本，避免触发客户端 MCP 超时。
 
 ## 性能与精度验证
 
@@ -252,7 +259,7 @@ marine-extremes/
 │   ├── result.py                     # DetectResult 结果容器（save、to_mat、open、to_dataset）
 │   └── streaming.py                  # 多文件通配符懒加载、单维压缩与内存分块
 ├── skills/marine-extremes/SKILL.md   # 通用 Agent Skill（Claude Code / Codex / Cursor 等）
-├── tests/                            # 单元测试、精度对标、边界压测、流式 I/O 与 MATLAB R2025b 验证
+├── tests/                            # 单元测试、CF、MCP、精度对标、边界压测、流式 I/O 与 MATLAB R2025b 验证
 ├── examples/quickstart.py            # 无需外部数据的快速入门脚本
 ├── benchmarks/bench_global_scale.py  # 合成全球规模吞吐量基准脚本
 ├── docs/

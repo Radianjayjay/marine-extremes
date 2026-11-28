@@ -11,7 +11,7 @@
 
 `marine-extremes` is a Rust-accelerated Python package for detecting marine heatwaves (MHWs), marine cold spells (MCSs), and general scalar marine extremes such as salinity anomalies. It works on 1D station records, 3D surface grids (NOAA OISST, OSTIA), 4D depth-resolved ocean reanalyses (GLORYS, ORAS5, Argo), and multi-calendar CMIP6 simulations.
 
-An interactive architecture walkthrough is available in [docs/marine_extremes_overview.html](https://github.com/Radianjayjay/marine-extremes/blob/main/docs/marine_extremes_overview.html).
+See [docs/marine_extremes_overview.html](https://github.com/Radianjayjay/marine-extremes/blob/main/docs/marine_extremes_overview.html) for an interactive architecture walkthrough.
 
 ## What it does
 
@@ -24,8 +24,8 @@ An interactive architecture walkthrough is available in [docs/marine_extremes_ov
 - Multi-calendar and monthly support. Handles Gregorian and CMIP6 `cftime` calendars (`standard`, `proleptic_gregorian`, `noleap`/`365_day`, `360_day`, `all_leap`/`366_day`) as well as `freq="monthly"` detection (Jacox et al., 2020).
 - Explicit cross-tool compatibility profiles. Choose `compat="standard"`, `"m_mhw"`, `"m_mhw_python"`, `"oliver"`, or `"heatwaveR"` to match the quantile rule, threshold inequality, Feb 29 handling, and variance `ddof` of a specific reference tool.
 - Edge and sea-ice safeguards. Includes detection-only `max_pad_length`, `min_valid_fraction` filtering (without NaN bleed during circular smoothing), `truncated_start`/`truncated_end` flags, and `lower_bound` handling (`flag`, `mask`, or `floor` with zero-division protection).
-- CF-aware input resolution. Built-in lightweight CF metadata resolver (with optional `cf-xarray` enhancement) infers non-`time` time dimensions (`valid_time`, `time_counter`, `ocean_time`), filters `*_bnds`/`grid_mapping`/`ancillary_variables`, resolves CF `standard_name` and marine aliases, and warns on Kelvin vs. Celsius `lower_bound` mismatches.
-- AI Agent Skill & MCP server. Includes a universal Agent Skill ([skills/marine-extremes/SKILL.md](https://github.com/Radianjayjay/marine-extremes/blob/main/skills/marine-extremes/SKILL.md)) and an optional local stdio MCP server (`marine-extremes-mcp`, 4 tools) for natural-language workflows in coding agents and MCP clients.
+- CF-aware input resolution. Built-in lightweight CF metadata resolver (with optional `cf-xarray` support) infers non-`time` time dimensions (`valid_time`, `time_counter`, `ocean_time`), filters `*_bnds`/`grid_mapping`/`ancillary_variables`, resolves CF `standard_name` and marine aliases, and warns on Kelvin vs. Celsius `lower_bound` mismatches.
+- AI agent skill and MCP server. Ships an Agent Skill ([skills/marine-extremes/SKILL.md](https://github.com/Radianjayjay/marine-extremes/blob/main/skills/marine-extremes/SKILL.md)) and an optional local stdio MCP server (`marine-extremes-mcp`) with four tools: `inspect_dataset`, `detect_extremes`, `query_events`, and `summarize_result`.
 
 ## Installation
 
@@ -44,9 +44,9 @@ Optional dependency groups in [pyproject.toml](https://github.com/Radianjayjay/m
 - `marine-extremes[netcdf]`: `netCDF4`, `h5netcdf`, `cftime`, `dask`
 - `marine-extremes[mat]`: `h5py`, `scipy` (MATLAB v7.3 and v5 `.mat`)
 - `marine-extremes[zarr]`: `zarr>=3.0`, `cftime`, `dask`
-- `marine-extremes[cf]`: `cf-xarray` (optional CF accessor & custom criteria enhancement)
+- `marine-extremes[cf]`: `cf-xarray` (optional CF accessor and custom criteria support)
 - `marine-extremes[mcp]`: `mcp` (optional stdio MCP server `marine-extremes-mcp` for AI clients)
-- `marine-extremes[io]`: all of the above (`netcdf`, `mat`, `zarr`, `cf`)
+- `marine-extremes[io]`: all I/O backends (`netcdf`, `mat`, `zarr`, `cf`; excludes `mcp`)
 - `marine-extremes[dev]`: `pytest`, `maturin`
 
 To build from source instead (requires a Rust toolchain):
@@ -101,20 +101,24 @@ To run the standalone demo without external data:
 python examples/quickstart.py
 ```
 
-## Use with AI Agents (Skill & MCP)
+## Use with AI agents (Skill and MCP)
 
-### Agent Skill & copy-paste prompts (recommended for coding agents)
+### Agent Skill and copy-paste prompts (recommended for coding agents)
 
-For agents that can run local Python (Claude Code, Codex, Cursor, Antigravity, Windsurf, OpenCode), install `marine-extremes[io]` and install the universal skill file [skills/marine-extremes/SKILL.md](https://github.com/Radianjayjay/marine-extremes/blob/main/skills/marine-extremes/SKILL.md):
+If your coding agent can run local Python (Claude Code, Codex, Cursor, Antigravity, Windsurf, OpenCode), install `marine-extremes[io]` and copy [skills/marine-extremes/SKILL.md](https://github.com/Radianjayjay/marine-extremes/blob/main/skills/marine-extremes/SKILL.md) into its skills directory. When key parameters are not specified up front, the skill inspects the dataset first and prompts via interactive choice cards (or numbered chat options) to fill in `mx.detect(...)` settings such as climatology baseline (30-year fixed, 30/31-year centered moving, 11-year centered moving, or detrended), `compat`, physical bounds, precision, and output format, alongside ocean-data safeguards (explicit `var` on multi-variable files, Kelvin vs. Celsius `lower_bound` checks, singleton dimensions, and disk-backed streaming):
 
 ```bash
-# Example: install for Claude Code or Codex user skills (keep whichever path matches your tool)
+# From a local clone (keep whichever path matches your agent)
 mkdir -p ~/.claude/skills/marine-extremes ~/.codex/skills/marine-extremes
 cp skills/marine-extremes/SKILL.md ~/.claude/skills/marine-extremes/SKILL.md
 cp skills/marine-extremes/SKILL.md ~/.codex/skills/marine-extremes/SKILL.md
+
+# Or download directly if you installed from PyPI without cloning
+curl -fsSL https://raw.githubusercontent.com/Radianjayjay/marine-extremes/main/skills/marine-extremes/SKILL.md \
+  -o ~/.claude/skills/marine-extremes/SKILL.md
 ```
 
-Or copy this standalone prompt directly into any coding agent without installing the skill file first:
+If you prefer not to install the skill file, paste this prompt into your coding agent:
 
 ```text
 Use the Python package `marine-extremes` (`import marine_extremes as mx`) to detect MHWs/MCSs on <YOUR_DATA_PATH>.
@@ -122,16 +126,19 @@ Inspect dims/units first (pass `var="sst", squeeze_singleton="zlev"` for OISST; 
 Write results to `out="<OUT>.nc"` with `working_dtype="auto", intensity_dtype="float32", memory_limit="4GB"`, and use `res.events.sel(...)` / `count_map()` for queries.
 ```
 
-Once the Skill (or MCP server below) is configured, you can ask in plain natural language, for example:
-- `"Inspect sst.day.mean.*.nc, run dual MHW+MCS detection on the 1982-2011 baseline writing outputs/oisst.nc, and list the top 5 longest events near (-42.5, 148.0)."`
+With either the Skill or the MCP server set up, you can ask directly:
+
+> "Inspect `sst.day.mean.*.nc`, run dual MHW+MCS detection on the 1982-2011 baseline and save results to `outputs/oisst.nc`, and list the top 5 longest events near (-42.5, 148.0)."
 
 ### Optional stdio MCP server (for desktop/chat AI clients)
+
+Install the optional MCP extra (compatible with MCP Python SDK v1 and v2):
 
 ```bash
 pip install "marine-extremes[io,mcp]"
 ```
 
-Register the local stdio server in your MCP client config:
+Register the local stdio server in your MCP client config (for example Claude Desktop or Cherry Studio):
 
 ```json
 {
@@ -158,12 +165,12 @@ If a desktop client does not inherit your Conda/virtualenv `PATH`, point directl
 
 | MCP tool | Purpose |
 | --- | --- |
-| `inspect_dataset` | Inspect variables, dims/coords, CF time calendar, singleton dims, and Kelvin/Celsius notes before running detection. |
-| `detect_extremes` | Stream detection across fixed/detrended/moving/threshold baselines to a single `out` file and return compact summary + sample rows. |
-| `query_events` | Perform O(1) CSR grid lookup by `coords`/`indices` or chunked filtering and top-k sorting without loading full catalogs. |
-| `summarize_result` | Aggregate pixel coverage, event counts by type/category/start year, duration range, and peak absolute intensity. |
+| `inspect_dataset` | Inspect variables, dimensions, 1D coordinate ranges (flagging multidimensional curvilinear coords), CF time calendar, singleton dimensions, and Kelvin vs. Celsius notes before running detection. |
+| `detect_extremes` | Stream detection across fixed, detrended, moving, or fixed-threshold baselines (with optional 1D `region` slicing) to one `out` file. Returns compact metadata, warnings, and up to 50 sample rows, and refuses to overwrite input files or non-Zarr directories. |
+| `query_events` | Look up one grid cell in O(1) via CSR `coords` (nearest numeric or exact string) or `indices`, or run chunked filters (event type, duration, category, `YYYY` / `YYYY-MM` / `YYYY-MM-DD` dates) with top-k sorting (up to 500 rows) or `limit=0` counts. |
+| `summarize_result` | Aggregate pixel coverage, event counts by type, category, and start year, duration stats, and peak absolute intensity in chunks without loading the full catalog into memory. |
 
-For multi-decade global high-resolution runs (e.g. 0.25° OISST/OSTIA), prefer running a Python script via the Skill so long detections do not hit client MCP call timeouts.
+`detect_extremes` writes gridded output to `out` and returns only compact metadata and sample rows, so large arrays stay out of model context. For multi-decade global high-resolution runs (such as 0.25° OISST or OSTIA), run a Python script through the Skill so long detections do not hit MCP client timeouts.
 
 ## Benchmarks and verification
 
@@ -252,7 +259,7 @@ marine-extremes/
 │   ├── result.py                     # DetectResult container (save, to_mat, open, to_dataset)
 │   └── streaming.py                  # Multi-file glob reader, singleton squeeze & memory tiling
 ├── skills/marine-extremes/SKILL.md   # Agent Skill guide for Claude Code / Codex / Cursor / etc.
-├── tests/                            # Unit, parity, adversarial, streaming & MATLAB R2025b tests
+├── tests/                            # Unit, CF, MCP, parity, adversarial, streaming & MATLAB R2025b tests
 ├── examples/quickstart.py            # Standalone runnable quickstart
 ├── benchmarks/bench_global_scale.py  # Synthetic global-scale throughput benchmark
 ├── docs/
@@ -263,7 +270,7 @@ marine-extremes/
 
 ## Scope
 
-`marine-extremes` handles point-wise 1D-4D extreme event detection and single-target output. It does not perform 3D/4D spatial connected-component object tracking, vertical ocean heat content integration, or vertical subtype classification.
+`marine-extremes` handles point-wise 1D-4D extreme event detection and single-target output. It does not include 3D/4D spatial connected-component object tracking, vertical ocean heat content integration, or vertical subtype classification.
 
 ## Development and testing
 

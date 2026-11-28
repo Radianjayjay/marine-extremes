@@ -6,7 +6,7 @@ All notable changes to `marine-extremes` are documented in this file.
 
 ### Added
 - Built-in lightweight CF metadata resolver (`marine_extremes.cf`) with optional `cf-xarray` (`[cf]`) enhancement: automatic non-`time` dimension inference (`valid_time`, `time_counter`, `ocean_time`), CF auxiliary variable filtering (`*_bnds`, `grid_mapping`, `ancillary_variables`, `cell_measures`), `standard_name` / marine alias variable selection, and Kelvin vs. Celsius `lower_bound` mismatch warnings.
-- Universal AI Agent Skill ([skills/marine-extremes/SKILL.md](https://github.com/Radianjayjay/marine-extremes/blob/main/skills/marine-extremes/SKILL.md)) for coding agents (Claude Code, Codex, Cursor, Antigravity, Windsurf, OpenCode).
+- Universal AI Agent Skill ([skills/marine-extremes/SKILL.md](https://github.com/Radianjayjay/marine-extremes/blob/main/skills/marine-extremes/SKILL.md)) for coding agents (Claude Code, Codex, Cursor, Antigravity, Windsurf, OpenCode), including an auto-inspect interactive parameter wizard to assemble `mx.detect(...)` settings.
 - Optional local stdio MCP server (`marine-extremes-mcp` / `[mcp]` extra, supporting MCP SDK v2 and v1) exposing `inspect_dataset`, `detect_extremes`, `query_events`, and `summarize_result` with path-overlap protection, `ToolError` diagnostics, and real stdio end-to-end tests.
 
 ## [0.1.0] - 2026-11-27
