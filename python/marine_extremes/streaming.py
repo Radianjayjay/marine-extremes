@@ -83,26 +83,54 @@ def _squeeze_singleton_dims(
 ) -> xr.DataArray:
     """Drop requested length-1 non-time dimensions from a normalized DataArray."""
     if squeeze_singleton is True:
-        drop_dims = [d for d in da.dims if d != resolved_time_dim and da.sizes[d] == 1]
-        if drop_dims:
-            da = da.squeeze(drop_dims, drop=True)
+        candidates: Sequence[str] = [d for d in da.dims if d != resolved_time_dim and da.sizes[d] == 1]
     elif isinstance(squeeze_singleton, str):
-        if squeeze_singleton in da.dims and squeeze_singleton != resolved_time_dim:
-            if da.sizes[squeeze_singleton] != 1:
-                raise ValueError(
-                    f"Cannot squeeze dim '{squeeze_singleton}' of size {da.sizes[squeeze_singleton]} != 1"
-                )
-            da = da.squeeze(squeeze_singleton, drop=True)
+        candidates = (squeeze_singleton,)
     elif isinstance(squeeze_singleton, Sequence) and not isinstance(squeeze_singleton, (bytes, bytearray)):
-        to_drop = []
-        for d in squeeze_singleton:
-            if d in da.dims and d != resolved_time_dim:
-                if da.sizes[d] != 1:
-                    raise ValueError(f"Cannot squeeze dim '{d}' of size {da.sizes[d]} != 1")
-                to_drop.append(d)
-        if to_drop:
-            da = da.squeeze(to_drop, drop=True)
-    return da
+        candidates = squeeze_singleton
+    else:
+        return da
+
+    to_drop = []
+    for d in candidates:
+        if d in da.dims and d != resolved_time_dim:
+            if da.sizes[d] != 1:
+                raise ValueError(f"Cannot squeeze dim '{d}' of size {da.sizes[d]} != 1")
+            to_drop.append(d)
+    return da.squeeze(to_drop, drop=True) if to_drop else da
+
+
+def resolve_input_paths(path: str | Path) -> tuple[list[Path], bool]:
+    """Resolve an existing file/Zarr store or glob pattern to concrete path(s)."""
+    p_str = str(path)
+    if not p_str.strip():
+        raise ValueError("Input path must be a non-empty string.")
+    p = Path(p_str)
+    if p.exists():
+        return [p], False
+    if any(ch in p_str for ch in ("*", "?", "[")):
+        matched = sorted(glob_mod.glob(p_str))
+        if not matched:
+            raise FileNotFoundError(f"No files matched glob pattern: {p_str!r}")
+        return [Path(m) for m in matched], True
+    raise FileNotFoundError(f"Input path does not exist: {p}")
+
+
+def open_path_dataset(data: str | Path | Sequence[str | Path]) -> tuple[xr.Dataset, list[Path]]:
+    """Open a file, Zarr dir, glob, or path sequence lazily without loading arrays."""
+    if isinstance(data, (str, Path)):
+        paths, is_multi = resolve_input_paths(data)
+    else:
+        paths = [Path(p) for p in data]
+        is_multi = True
+    if is_multi:
+        mf_kw: dict[str, Any] = {"combine": "by_coords"}
+        if all(q.is_dir() or q.suffix == ".zarr" for q in paths):
+            mf_kw.update(engine="zarr", consolidated=False)
+        return xr.open_mfdataset([str(q) for q in paths], **mf_kw), paths
+    p = paths[0]
+    ds = xr.open_zarr(p, consolidated=False) if (p.is_dir() or p.suffix == ".zarr") else xr.open_dataset(p)
+    return ds, paths
 
 
 def open_data_input(
@@ -129,38 +157,14 @@ def open_data_input(
                 coords={synth_time_dim: t_vals},
                 name=data.name or var or "value",
             )
-        elif isinstance(data, (str, Path)):
-            p_str = str(data)
-            if not p_str.strip():
-                raise ValueError("Input path must be a non-empty string.")
-            p = Path(p_str)
-            if not p.exists() and any(ch in p_str for ch in ("*", "?", "[")):
-                paths = sorted(glob_mod.glob(p_str))
-                if not paths:
-                    raise FileNotFoundError(f"No files matched glob pattern: {p_str!r}")
-                mf_kw: dict[str, Any] = {"combine": "by_coords"}
-                if all(Path(q).is_dir() or Path(q).suffix == ".zarr" for q in paths):
-                    mf_kw.update(engine="zarr", consolidated=False)
-                ds = xr.open_mfdataset(paths, **mf_kw)
-                closers.append(ds)
-                da = select_dataset_var(ds, var, time_dim=time_dim)
-            else:
-                if not p.exists():
-                    raise FileNotFoundError(f"Input path does not exist: {p}")
-                if p.is_dir() or p.suffix == ".zarr":
-                    ds = xr.open_zarr(p, consolidated=False)
-                else:
-                    ds = xr.open_dataset(p)
-                closers.append(ds)
-                da = select_dataset_var(ds, var, time_dim=time_dim)
         elif isinstance(data, Sequence) and not isinstance(data, (bytes, bytearray)) and len(data) == 0:
             raise ValueError("Input data sequence is empty.")
-        elif isinstance(data, Sequence) and not isinstance(data, (bytes, bytearray)) and isinstance(data[0], (str, Path)):
-            paths = [str(p) for p in data]
-            mf_kw = {"combine": "by_coords"}
-            if all(Path(q).is_dir() or Path(q).suffix == ".zarr" for q in paths):
-                mf_kw.update(engine="zarr", consolidated=False)
-            ds = xr.open_mfdataset(paths, **mf_kw)
+        elif isinstance(data, (str, Path)) or (
+            isinstance(data, Sequence)
+            and not isinstance(data, (bytes, bytearray))
+            and isinstance(data[0], (str, Path))
+        ):
+            ds, _ = open_path_dataset(data)
             closers.append(ds)
             da = select_dataset_var(ds, var, time_dim=time_dim)
         else:

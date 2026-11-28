@@ -32,21 +32,17 @@ jobs:
           RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag }}
         run: |
           python - <<'PY'
-          import ast, os, tomllib
+          import os, re, tomllib
           tag = os.environ["RELEASE_TAG"].lstrip("v")
           py_ver = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
           rs_ver = tomllib.load(open("Cargo.toml", "rb"))["package"]["version"]
-          tree = ast.parse(open("python/marine_extremes/__init__.py", encoding="utf-8").read())
-          init_ver = next(
-              ast.literal_eval(node.value)
-              for node in tree.body
-              if isinstance(node, ast.Assign)
-              and any(isinstance(t, ast.Name) and t.id == "__version__" for t in node.targets)
-          )
+          init_ver = re.search(
+              r'^__version__\s*=\s*"([^"]+)"',
+              open("python/marine_extremes/__init__.py", encoding="utf-8").read(),
+              re.M,
+          ).group(1)
           print(f"tag={tag}, pyproject={py_ver}, cargo={rs_ver}, init={init_ver}")
-          assert tag == py_ver == rs_ver == init_ver, (
-              f"Version mismatch: tag={tag}, pyproject={py_ver}, cargo={rs_ver}, init={init_ver}"
-          )
+          assert tag == py_ver == rs_ver == init_ver, f"Version mismatch: {tag}, {py_ver}, {rs_ver}, {init_ver}"
           PY
       - name: Run Rust unit tests
         run: cargo test --lib

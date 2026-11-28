@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections import Counter
 import datetime as dt
 import functools
-import glob as glob_mod
 import math
 import threading
 import warnings
@@ -16,10 +16,10 @@ import pandas as pd
 import xarray as xr
 
 import marine_extremes as mx
+from marine_extremes.api import _normalize_event_mode
 from marine_extremes.calendar import _is_cftime_obj, date_to_ymd_key, dates_to_yyyymmdd, encode_time_axis
 from marine_extremes.cf import cf_auxiliary_vars, is_kelvin_units, resolve_time_dim, select_dataset_var
-from marine_extremes.io_formats import resolve_out_format
-from marine_extremes.streaming import _squeeze_singleton_dims
+from marine_extremes.streaming import _squeeze_singleton_dims, open_path_dataset, resolve_input_paths
 
 try:
     from pydantic import Field as _Field
@@ -29,7 +29,7 @@ except ImportError:  # pragma: no cover
         return description
 
 
-# MCP SDK v2 dispatches sync tools via anyio worker threads; serialize file I/O and warnings capture.
+# MCP SDK v2 dispatches sync tools on anyio worker threads; serialize file I/O and warnings.catch_warnings.
 _MCP_IO_LOCK = threading.Lock()
 
 
@@ -48,17 +48,12 @@ def _to_jsonable(val: Any) -> Any:
     if isinstance(val, (int, np.integer)):
         return int(val)
     if isinstance(val, (float, np.floating)):
-        f = float(val)
-        return f if math.isfinite(f) else None
+        return float(val) if math.isfinite(float(val)) else None
     if isinstance(val, Path):
         return str(val)
     if isinstance(val, np.datetime64):
         return None if np.isnat(val) else str(np.datetime_as_string(val, unit="D"))
-    if isinstance(val, pd.Timestamp):
-        return None if pd.isna(val) else f"{val.year:04d}-{val.month:02d}-{val.day:02d}"
-    if isinstance(val, (dt.date, dt.datetime)):
-        return f"{val.year:04d}-{val.month:02d}-{val.day:02d}"
-    if _is_cftime_obj(val):
+    if isinstance(val, (dt.date, dt.datetime)) or _is_cftime_obj(val):
         return f"{val.year:04d}-{val.month:02d}-{val.day:02d}"
     if isinstance(val, dict):
         return {str(k): _to_jsonable(v) for k, v in val.items()}
@@ -69,35 +64,6 @@ def _to_jsonable(val: Any) -> Any:
             return _to_jsonable(val[()]) if val.ndim == 0 else [_to_jsonable(x) for x in val]
         return _to_jsonable(val.tolist())
     return str(val)
-
-
-def _resolve_input_paths(path: str) -> tuple[list[Path], bool]:
-    """Resolve an input file, Zarr store, or glob pattern to concrete existing path(s)."""
-    if not isinstance(path, str) or not path.strip():
-        raise ValueError("Input path must be a non-empty string.")
-    p = Path(path)
-    if p.exists():
-        return [p], False
-    if any(ch in path for ch in ("*", "?", "[")):
-        matched = sorted(glob_mod.glob(path))
-        if not matched:
-            raise FileNotFoundError(f"No files matched glob pattern: {path!r}")
-        return [Path(m) for m in matched], True
-    raise FileNotFoundError(f"Input path does not exist: {p}")
-
-
-def _open_raw_dataset(path: str) -> tuple[xr.Dataset, list[Path]]:
-    """Open a single NetCDF/Zarr path or glob pattern read-only without eagerly loading arrays."""
-    paths, is_glob = _resolve_input_paths(path)
-    if is_glob:
-        mf_kw: dict[str, Any] = {"combine": "by_coords"}
-        if all(q.is_dir() or q.suffix == ".zarr" for q in paths):
-            mf_kw.update(engine="zarr", consolidated=False)
-        return xr.open_mfdataset([str(q) for q in paths], **mf_kw), paths
-    p = paths[0]
-    if p.is_dir() or p.suffix == ".zarr":
-        return xr.open_zarr(p, consolidated=False), paths
-    return xr.open_dataset(p), paths
 
 
 def _validate_output_path(out: str, input_paths: Sequence[Path]) -> None:
@@ -118,11 +84,7 @@ def _validate_output_path(out: str, input_paths: Sequence[Path]) -> None:
                 f"Output path '{out}' overlaps input dataset path '{in_p}'; choose a different output path."
             )
     if out_p.exists() and out_p.is_dir():
-        try:
-            fmt = resolve_out_format(out_p, None)
-        except ValueError as exc:
-            raise ValueError(f"Output path '{out}' is an existing directory.") from exc
-        if fmt != "zarr":
+        if out_p.suffix.lower() != ".zarr":
             raise ValueError(f"Output path '{out}' is an existing directory.")
         if not ((out_p / "zarr.json").exists() or (out_p / ".zgroup").exists()):
             raise ValueError(f"Refusing to overwrite non-Zarr directory '{out}' with Zarr output.")
@@ -135,50 +97,45 @@ def inspect_dataset(
 ) -> dict[str, Any]:
     """Inspect NetCDF/Zarr variables, dimensions, time calendar, units, and CF recommendations."""
     with _MCP_IO_LOCK:
-        ds, input_paths = _open_raw_dataset(path)
-        n_files = len(input_paths)
+        ds, input_paths = open_path_dataset(path)
         try:
             aux = cf_auxiliary_vars(ds)
             data_vars = [
                 {
-                    "name": str(vname),
+                    "name": str(v),
                     "dims": [str(d) for d in da.dims],
                     "shape": [int(s) for s in da.shape],
                     "dtype": str(da.dtype),
                     "units": _to_jsonable(da.attrs.get("units", "")),
                     "standard_name": _to_jsonable(da.attrs.get("standard_name", "")),
                     "long_name": _to_jsonable(da.attrs.get("long_name", "")),
-                    "is_auxiliary": str(vname) in aux,
+                    "is_auxiliary": str(v) in aux,
                 }
-                for vname, da in ds.data_vars.items()
+                for v, da in ds.data_vars.items()
             ]
 
             da_sel: xr.DataArray | None = None
-            var_note: str | None = None
+            tips: list[str] = []
             try:
                 da_sel = select_dataset_var(ds, var, time_dim=time_dim)
                 rec_var: str | None = str(da_sel.name)
             except (ValueError, KeyError) as exc:
                 rec_var = None
-                var_note = str(exc)
+                tips.append(str(exc))
 
-            target_obj: xr.Dataset | xr.DataArray = da_sel if da_sel is not None else ds
+            target = da_sel if da_sel is not None else ds
             resolved_t: str | None = None
             t_obj: Any = None
             try:
-                t_obj = resolve_time_dim(target_obj, time_dim)
+                t_obj = resolve_time_dim(target, time_dim)
                 resolved_t = str(t_obj)
             except ValueError:
-                resolved_t = None
-
-            tips: list[str] = []
-            if var_note:
-                tips.append(var_note)
+                pass
 
             time_range: dict[str, Any] | None = None
-            if t_obj is not None and t_obj in target_obj.coords:
+            if t_obj is not None and t_obj in target.coords:
                 try:
-                    cal = encode_time_axis(target_obj.coords[t_obj])
+                    cal = encode_time_axis(target.coords[t_obj])
                     time_range = {
                         "start": _to_jsonable(cal.raw_time[0]),
                         "end": _to_jsonable(cal.raw_time[-1]),
@@ -189,48 +146,38 @@ def inspect_dataset(
                     time_range = {"n_steps": int(ds.sizes[t_obj])}
                     tips.append(f"Time coordinate '{resolved_t}' could not be decoded as calendar dates: {exc}")
 
-            target_dims = [str(d) for d in target_obj.dims]
-            singleton_dims = [d for d in target_dims if d != resolved_t and int(ds.sizes[d]) == 1]
-
+            singleton_dims = [str(d) for d in target.dims if str(d) != resolved_t and int(ds.sizes[d]) == 1]
             spatial_coords: dict[str, Any] = {}
-            curvilinear_coords: list[str] = []
-            for d in ds.coords:
-                c = ds.coords[d]
+            curvilinear: list[str] = []
+            for d, c in ds.coords.items():
                 if str(d) == resolved_t:
                     continue
                 if c.dims == (d,):
                     arr = np.asarray(c.values)
                     if arr.dtype.kind in ("i", "u", "f"):
-                        finite = arr[np.isfinite(arr)]
+                        fin = arr[np.isfinite(arr)]
                         spatial_coords[str(d)] = {
                             "size": int(arr.size),
-                            "min": _to_jsonable(np.min(finite)) if finite.size > 0 else None,
-                            "max": _to_jsonable(np.max(finite)) if finite.size > 0 else None,
+                            "min": _to_jsonable(np.min(fin)) if fin.size > 0 else None,
+                            "max": _to_jsonable(np.max(fin)) if fin.size > 0 else None,
                         }
                     else:
                         spatial_coords[str(d)] = {"size": int(arr.size), "dtype": str(arr.dtype)}
                 elif len(c.dims) >= 2:
-                    curvilinear_coords.append(str(d))
+                    curvilinear.append(str(d))
 
-            if curvilinear_coords:
+            if curvilinear:
+                tips.append(f"Multidimensional coordinates {curvilinear} found; detect_extremes `region` requires 1D coords.")
+            if da_sel is not None and is_kelvin_units(raw_u := da_sel.attrs.get("units")):
                 tips.append(
-                    f"Multidimensional coordinates {curvilinear_coords} found; detect_extremes `region` slicing requires 1D coordinates."
+                    f"Variable '{rec_var}' has units='{_to_jsonable(raw_u)}' (Kelvin); use Kelvin lower_bound (e.g., 271.35) or convert to degC."
                 )
-            if da_sel is not None:
-                raw_units = da_sel.attrs.get("units")
-                if is_kelvin_units(raw_units):
-                    tips.append(
-                        f"Variable '{rec_var}' has units='{_to_jsonable(raw_units)}' (Kelvin); "
-                        "use Kelvin lower_bound (e.g., 271.35) or convert to degC."
-                    )
             if singleton_dims:
-                tips.append(
-                    f"Singleton dims {singleton_dims} found; pass squeeze_singleton=True or dim name when calling detect_extremes."
-                )
+                tips.append(f"Singleton dims {singleton_dims} found; pass squeeze_singleton=True or dim name to detect_extremes.")
 
             return {
                 "path": path,
-                "n_files": n_files,
+                "n_files": len(input_paths),
                 "dims": {str(k): int(v) for k, v in ds.sizes.items()},
                 "data_vars": data_vars,
                 "recommended_var": rec_var,
@@ -258,18 +205,13 @@ def _build_baseline(
     bt = baseline_type.strip().lower()
     if bt == "fixed":
         return mx.FixedBaseline(start=baseline_start, end=baseline_end)
-    if bt == "detrended_linear":
-        return mx.DetrendedBaseline(method="linear", start=baseline_start, end=baseline_end)
-    if bt == "detrended_quadratic":
-        return mx.DetrendedBaseline(method="quadratic", start=baseline_start, end=baseline_end)
+    if bt in ("detrended_linear", "detrended_quadratic"):
+        method = "linear" if bt == "detrended_linear" else "quadratic"
+        return mx.DetrendedBaseline(method=method, start=baseline_start, end=baseline_end)
     if bt == "moving":
         return mx.MovingBaseline(window_years=moving_window_years, center=moving_center, boundary=moving_boundary)
     if bt == "fixed_threshold":
-        return mx.FixedThreshold(
-            threshold_high=threshold_high,
-            threshold_low=threshold_low,
-            climatology=threshold_climatology,
-        )
+        return mx.FixedThreshold(threshold_high=threshold_high, threshold_low=threshold_low, climatology=threshold_climatology)
     raise ValueError(
         f"Unsupported baseline_type='{baseline_type}'. "
         "Expected 'fixed', 'detrended_linear', 'detrended_quadratic', 'moving', or 'fixed_threshold'."
@@ -295,15 +237,15 @@ def _slice_region(da: xr.DataArray, region: dict[str, list[float]], *, time_dim:
         b0, b1 = float(bounds[0]), float(bounds[1])
         if not (math.isfinite(b0) and math.isfinite(b1)):
             raise ValueError(f"Region bounds for '{dim}' must be finite, got {bounds!r}.")
-        vals_f = vals.astype(np.float64, copy=False)
-        if not np.all(np.isfinite(vals_f)):
+        vf = vals.astype(np.float64, copy=False)
+        if not np.all(np.isfinite(vf)):
             raise ValueError(f"Coordinate '{dim}' contains non-finite values and cannot be sliced via `region`.")
-        if vals_f.size >= 2:
-            diffs = np.diff(vals_f)
+        if vf.size >= 2:
+            diffs = np.diff(vf)
             if not (np.all(diffs >= 0) or np.all(diffs <= 0)):
                 raise ValueError(f"Coordinate '{dim}' is not monotonic and cannot be sliced via `region`.")
         lo, hi = sorted((b0, b1))
-        sl = slice(hi, lo) if (vals_f.size >= 2 and vals_f[0] > vals_f[-1]) else slice(lo, hi)
+        sl = slice(hi, lo) if (vf.size >= 2 and vf[0] > vf[-1]) else slice(lo, hi)
         da = da.sel({dim: sl})
         if da.sizes[dim] == 0:
             raise ValueError(f"Region {bounds} selected 0 grid points along '{dim}'.")
@@ -349,72 +291,42 @@ def detect_extremes(
     if int(sample_limit) < 0:
         raise ValueError(f"sample_limit must be >= 0, got {sample_limit}")
     base = _build_baseline(
-        baseline_type,
-        baseline_start,
-        baseline_end,
-        moving_window_years,
-        moving_center,
-        moving_boundary,
-        threshold_high,
-        threshold_low,
-        threshold_climatology,
+        baseline_type, baseline_start, baseline_end, moving_window_years,
+        moving_center, moving_boundary, threshold_high, threshold_low, threshold_climatology,
     )
     det_period = (detect_start, detect_end) if (detect_start is not None or detect_end is not None) else None
 
     with _MCP_IO_LOCK:
-        input_paths, _ = _resolve_input_paths(path)
-        _validate_output_path(out, input_paths)
         raw_ds: xr.Dataset | None = None
         res: mx.DetectResult | None = None
         try:
             if region is not None:
-                raw_ds, _ = _open_raw_dataset(path)
+                raw_ds, input_paths = open_path_dataset(path)
+                _validate_output_path(out, input_paths)
                 da = select_dataset_var(raw_ds, var, time_dim=time_dim)
                 resolved_t = resolve_time_dim(da, time_dim)
-                da = _squeeze_singleton_dims(da, resolved_t, squeeze_singleton)
-                data_input: Any = _slice_region(da, region, time_dim=resolved_t)
-                detect_var = None
-                detect_time_dim: str | None = str(resolved_t)
-                detect_squeeze: bool | str | list[str] = False
+                data_input: Any = _slice_region(_squeeze_singleton_dims(da, resolved_t, squeeze_singleton), region, time_dim=resolved_t)
+                detect_var, detect_time_dim, detect_squeeze = None, str(resolved_t), False
             else:
-                data_input = path
-                detect_var = var
-                detect_time_dim = time_dim
-                detect_squeeze = squeeze_singleton
+                input_paths, _ = resolve_input_paths(path)
+                _validate_output_path(out, input_paths)
+                data_input, detect_var, detect_time_dim, detect_squeeze = path, var, time_dim, squeeze_singleton
 
             with warnings.catch_warnings(record=True) as caught:
                 warnings.simplefilter("always", UserWarning)
                 res = mx.detect(
-                    data_input,
-                    var=detect_var,
-                    time_dim=detect_time_dim,
-                    squeeze_singleton=detect_squeeze,
-                    event=event,
-                    baseline=base,
-                    detect_period=det_period,
-                    pctile_high=pctile_high,
-                    pctile_low=pctile_low,
-                    freq=freq,
-                    min_duration=min_duration,
-                    max_gap=max_gap,
-                    max_pad_length=max_pad_length,
-                    min_valid_fraction=min_valid_fraction,
-                    lower_bound=lower_bound,
-                    bound_policy=bound_policy,
-                    compat=compat,
-                    working_dtype=working_dtype,
-                    intensity_dtype=intensity_dtype,
-                    memory_limit=memory_limit,
-                    out=out,
-                    mat_layout=mat_layout,
+                    data_input, var=detect_var, time_dim=detect_time_dim, squeeze_singleton=detect_squeeze,
+                    event=event, baseline=base, detect_period=det_period, pctile_high=pctile_high,
+                    pctile_low=pctile_low, freq=freq, min_duration=min_duration, max_gap=max_gap,
+                    max_pad_length=max_pad_length, min_valid_fraction=min_valid_fraction,
+                    lower_bound=lower_bound, bound_policy=bound_policy, compat=compat,
+                    working_dtype=working_dtype, intensity_dtype=intensity_dtype,
+                    memory_limit=memory_limit, out=out, mat_layout=mat_layout,
                 )
 
-            k = min(max(int(sample_limit), 0), 50, len(res.events) if res.events is not None else 0)
-            sample_df = pd.DataFrame()
-            if res.events is not None and k > 0:
-                first_chunk = next(res.events.iter_chunks(chunk_rows=k), None)
-                if first_chunk is not None:
-                    sample_df = first_chunk.slice(0, k).to_pandas()
+            k = min(int(sample_limit), 50, len(res.events) if res.events is not None else 0)
+            chunk0 = next(res.events.iter_chunks(chunk_rows=k), None) if (res.events is not None and k > 0) else None
+            sample_df = chunk0.slice(0, k).to_pandas() if chunk0 is not None else pd.DataFrame()
             return {
                 "out_path": str(res.out_path or out),
                 "n_events": len(res.events) if res.events is not None else 0,
@@ -429,22 +341,6 @@ def detect_extremes(
                 res.close()
             if raw_ds is not None:
                 raw_ds.close()
-
-
-def _normalize_query_event_type(event_type: str | None) -> str | None:
-    """Validate and normalize query event_type filter ('both' -> unfiltered None)."""
-    if event_type is None:
-        return None
-    et = str(event_type).strip().lower()
-    if et == "both":
-        return None
-    if et in ("high", "mhw"):
-        return "high"
-    if et in ("low", "mcs"):
-        return "low"
-    raise ValueError(
-        f"Unsupported event_type='{event_type}'. Expected 'high', 'low', 'mhw', 'mcs', or 'both'."
-    )
 
 
 def _filter_events_df(
@@ -462,9 +358,9 @@ def _filter_events_df(
     if event_type_norm is not None:
         mask &= df["event_type"].astype(str).to_numpy() == event_type_norm
     if min_duration is not None:
-        mask &= df["duration"].to_numpy() >= int(min_duration)
+        mask &= df["duration"].to_numpy() >= min_duration
     if min_category is not None:
-        mask &= df["category_max"].to_numpy() >= int(min_category)
+        mask &= df["category_max"].to_numpy() >= min_category
     if start_key is not None or end_key is not None:
         keys = dates_to_yyyymmdd(df["date_start"])
         if start_key is not None:
@@ -490,13 +386,13 @@ def query_events(
     """Query events from a saved result by O(1) grid coordinate/index or bounded chunked filtering."""
     if coords is not None and indices is not None:
         raise ValueError("Pass either `coords` or `indices`, not both.")
-    lim_raw = int(limit)
-    if lim_raw < 0:
+    if int(limit) < 0:
         raise ValueError(f"limit must be >= 0, got {limit}")
-    lim = min(lim_raw, 500)
+    lim = min(int(limit), 500)
 
+    et_mode = _normalize_event_mode(str(event_type).strip()) if event_type is not None else None
     filter_kw: dict[str, Any] = {
-        "event_type_norm": _normalize_query_event_type(event_type),
+        "event_type_norm": None if et_mode == "both" else et_mode,
         "min_duration": int(min_duration) if min_duration is not None else None,
         "min_category": int(min_category) if min_category is not None else None,
         "start_key": date_to_ymd_key(start_date, is_end=False) if start_date is not None else None,
@@ -511,36 +407,18 @@ def query_events(
                 raise ValueError(f"Result file '{result_path}' contains no event catalog.")
 
             if coords is not None or indices is not None:
-                if coords is not None:
-                    if not ev.spatial_dims:
-                        if coords:
-                            raise KeyError(f"1D catalog takes no coordinate selectors, got {list(coords)}")
-                    else:
-                        missing = [d for d in ev.spatial_dims if d not in coords]
-                        extra = [k for k in coords if k not in ev.spatial_dims]
-                        if missing or extra:
-                            raise KeyError(
-                                f"Expected coordinates for exact spatial dims {ev.spatial_dims}; "
-                                f"missing={missing}, unexpected={extra}"
-                            )
-                    df = ev.sel(**coords)
-                else:
-                    df = ev.isel(**indices)  # type: ignore[arg-type]
-
+                if coords is not None and "method" in coords and "method" not in ev.spatial_dims:
+                    raise KeyError("Unexpected coordinate key 'method'")
+                df = ev.sel(**coords) if coords is not None else ev.isel(**indices)  # type: ignore[arg-type]
                 if sort_by is not None and sort_by not in df.columns:
                     raise KeyError(f"Unknown sort_by column '{sort_by}'. Available: {list(df.columns)}")
                 df = _filter_events_df(df, **filter_kw)
                 total_matched = len(df)
-                if lim == 0:
-                    out_df = df.iloc[:0]
-                else:
-                    if sort_by is not None and not df.empty:
-                        df = df.sort_values(sort_by, ascending=not descending, kind="mergesort")
-                    out_df = df.head(lim)
+                if sort_by is not None and lim > 0 and not df.empty:
+                    df = df.sort_values(sort_by, ascending=not descending, kind="mergesort")
+                out_df = df.head(lim)
             else:
-                total_matched = 0
-                parts: list[pd.DataFrame] = []
-                held_rows = 0
+                total_matched, held_rows, parts = 0, 0, []
                 for chunk in ev.iter_chunks():
                     if sort_by is not None and sort_by not in chunk.schema.names:
                         raise KeyError(f"Unknown sort_by column '{sort_by}'. Available: {list(chunk.schema.names)}")
@@ -584,44 +462,31 @@ def summarize_result(
                 raise ValueError(f"Result file '{result_path}' contains no event catalog.")
 
             cmap = np.asarray(ev.count_map().values)
-            spatial_counts = {
-                "n_pixels": int(cmap.size),
-                "pixels_with_events": int(np.count_nonzero(cmap)),
-                "max_events_per_pixel": int(np.max(cmap)) if cmap.size else 0,
-                "mean_events_per_pixel": float(np.mean(cmap)) if cmap.size else 0.0,
-            }
-
-            by_type: dict[str, int] = {}
-            by_cat: dict[str, int] = {}
-            by_year: dict[str, int] = {}
+            by_type: Counter[str] = Counter()
+            by_cat: Counter[int] = Counter()
+            by_year: Counter[int] = Counter()
             dur_min: int | None = None
             dur_max: int | None = None
-            dur_sum = 0
+            dur_sum, n_total = 0, len(ev)
             max_abs_int: float | None = None
-            n_total = len(ev)
 
             for chunk in ev.iter_chunks():
                 df = chunk.to_pandas()
                 if df.empty:
                     continue
-                for k, v in df["event_type"].astype(str).value_counts().items():
-                    by_type[str(k)] = by_type.get(str(k), 0) + int(v)
-                for k, v in df["category_max"].value_counts().items():
-                    by_cat[str(int(k))] = by_cat.get(str(int(k)), 0) + int(v)
-                yrs = dates_to_yyyymmdd(df["date_start"]) // 10000
-                for k, v in pd.Series(yrs).value_counts().items():
-                    by_year[str(int(k))] = by_year.get(str(int(k)), 0) + int(v)
+                by_type.update(df["event_type"].astype(str))
+                by_cat.update(int(x) for x in df["category_max"].to_numpy())
+                by_year.update(int(x) for x in (dates_to_yyyymmdd(df["date_start"]) // 10000))
 
                 durs = df["duration"].to_numpy()
-                c_min, c_max = int(np.min(durs)), int(np.max(durs))
-                dur_min = c_min if dur_min is None else min(dur_min, c_min)
-                dur_max = c_max if dur_max is None else max(dur_max, c_max)
+                dur_min = int(np.min(durs)) if dur_min is None else min(dur_min, int(np.min(durs)))
+                dur_max = int(np.max(durs)) if dur_max is None else max(dur_max, int(np.max(durs)))
                 dur_sum += int(np.sum(durs))
 
                 abs_vals = np.abs(df["int_max"].to_numpy(dtype=np.float64))
-                finite = abs_vals[np.isfinite(abs_vals)]
-                if finite.size > 0:
-                    abs_i = float(np.max(finite))
+                fin = abs_vals[np.isfinite(abs_vals)]
+                if fin.size > 0:
+                    abs_i = float(np.max(fin))
                     max_abs_int = abs_i if max_abs_int is None else max(max_abs_int, abs_i)
 
             return {
@@ -630,15 +495,16 @@ def summarize_result(
                 "spatial_dims": list(ev.spatial_dims),
                 "spatial_shape": list(ev.spatial_shape),
                 "n_events": n_total,
-                "spatial_counts": spatial_counts,
-                "by_event_type": by_type,
-                "by_category_max": dict(sorted(by_cat.items(), key=lambda kv: int(kv[0]))),
-                "by_start_year": dict(sorted(by_year.items(), key=lambda kv: int(kv[0]))),
-                "duration": {
-                    "min": dur_min,
-                    "mean": (dur_sum / n_total) if n_total > 0 else None,
-                    "max": dur_max,
+                "spatial_counts": {
+                    "n_pixels": int(cmap.size),
+                    "pixels_with_events": int(np.count_nonzero(cmap)),
+                    "max_events_per_pixel": int(np.max(cmap)) if cmap.size else 0,
+                    "mean_events_per_pixel": float(np.mean(cmap)) if cmap.size else 0.0,
                 },
+                "by_event_type": dict(by_type),
+                "by_category_max": {str(k): by_cat[k] for k in sorted(by_cat)},
+                "by_start_year": {str(k): by_year[k] for k in sorted(by_year)},
+                "duration": {"min": dur_min, "mean": (dur_sum / n_total) if n_total > 0 else None, "max": dur_max},
                 "max_abs_intensity": _to_jsonable(max_abs_int),
             }
         finally:
@@ -666,8 +532,7 @@ def create_mcp_server() -> Any:
         from mcp.server.mcpserver import MCPServer
         from mcp.server.mcpserver.exceptions import ToolError
 
-        server_cls = MCPServer
-        tool_error_cls = ToolError
+        server_cls, tool_error_cls = MCPServer, ToolError
     except ImportError:
         try:
             from mcp.server.fastmcp import FastMCP
@@ -678,7 +543,7 @@ def create_mcp_server() -> Any:
 
                 tool_error_cls = FastToolError
             except ImportError:
-                tool_error_cls = None
+                pass
         except ImportError as exc:
             raise ImportError(
                 "The optional `mcp` package is required for marine-extremes-mcp. "

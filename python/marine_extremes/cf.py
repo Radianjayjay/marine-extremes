@@ -305,27 +305,18 @@ def select_dataset_var(ds: xr.Dataset, var: str | None = None, *, time_dim: str 
 
 def is_kelvin_units(raw_units: Any) -> bool:
     """Return True if a CF ``units`` attribute represents Kelvin."""
-    if raw_units is None:
-        return False
-    units = _as_str(raw_units).strip()
-    if not units:
-        return False
-    u_norm = "_".join(units.lower().split())
-    return units == "K" or u_norm in _KELVIN_UNITS
+    u = _as_str(raw_units).strip() if raw_units is not None else ""
+    return bool(u) and (u == "K" or "_".join(u.lower().split()) in _KELVIN_UNITS)
 
 
 def warn_if_units_mismatch(da: xr.DataArray, lower_bound: float | None, *, stacklevel: int = 3) -> None:
     """Warn (without modifying values) when temperature ``units`` and ``lower_bound`` conflict."""
     if lower_bound is None or not math.isfinite(lb := float(lower_bound)):
         return
-    if (raw_units := da.attrs.get("units")) is None:
+    if (raw_units := da.attrs.get("units")) is None or not (units := _as_str(raw_units).strip()):
         return
-    units = _as_str(raw_units).strip()
-    if not units:
-        return
-    u_norm = "_".join(units.lower().split())
 
-    if is_kelvin_units(raw_units) and lb < 100.0:
+    if is_kelvin_units(units) and lb < 100.0:
         warnings.warn(
             f"Input variable '{da.name or 'value'}' has units='{units}' (Kelvin), "
             f"but lower_bound={lower_bound!r} looks like Celsius (< 100). "
@@ -333,7 +324,7 @@ def warn_if_units_mismatch(da: xr.DataArray, lower_bound: float | None, *, stack
             UserWarning,
             stacklevel=stacklevel,
         )
-    elif (units == "C" or u_norm in _CELSIUS_UNITS) and lb > 150.0:
+    elif (units == "C" or "_".join(units.lower().split()) in _CELSIUS_UNITS) and lb > 150.0:
         warnings.warn(
             f"Input variable '{da.name or 'value'}' has units='{units}' (Celsius), "
             f"but lower_bound={lower_bound!r} looks like Kelvin (> 150). "
