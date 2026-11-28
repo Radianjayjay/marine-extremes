@@ -6,12 +6,14 @@ import asyncio
 import datetime as dt
 import json
 import sys
+import sysconfig
 import types
 import warnings
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pyarrow as pa
 import pytest
 import xarray as xr
 
@@ -306,8 +308,12 @@ def test_mcp_stdio_subprocess_end_to_end(tmp_path: Path):
         return json.loads(_extract_tool_text(res))
 
     cli_name = "marine-extremes-mcp.exe" if sys.platform == "win32" else "marine-extremes-mcp"
-    cli_path = Path(sys.executable).parent / cli_name
-    if cli_path.is_file():
+    cli_candidates = [Path(sys.executable).parent / cli_name]
+    scripts_dir = sysconfig.get_path("scripts")
+    if scripts_dir:
+        cli_candidates.append(Path(scripts_dir) / cli_name)
+    cli_path = next((p for p in cli_candidates if p.is_file()), None)
+    if cli_path is not None:
         primary_params = StdioServerParameters(command=str(cli_path), args=[])
         has_cli = True
     else:
@@ -417,6 +423,10 @@ def test_mcp_stdio_subprocess_end_to_end(tmp_path: Path):
 
 def test_to_jsonable_edge_cases():
     cftime = pytest.importorskip("cftime")
+    ts_5dig = pa.Table.from_arrays(
+        [pa.array(np.array([np.datetime64("10001-02-03", "s")]))],
+        names=["d"],
+    ).to_pandas()["d"].iloc[0]
     sample = {
         "nat": pd.NaT,
         "na": pd.NA,
@@ -425,6 +435,11 @@ def test_to_jsonable_edge_cases():
         "arr0d_num": np.array(3.14),
         "arr0d_str": np.array("degC"),
         "arr1d": np.array([1, 2]),
+        "td": np.timedelta64(6, "h"),
+        "td_nat": np.timedelta64("NaT", "ns"),
+        "arr0d_td": np.array(np.timedelta64(1, "D")),
+        "arr_dt64": np.array([np.datetime64("2000-01-01", "ns"), np.datetime64("NaT", "ns")]),
+        "ts_5dig": ts_5dig,
         "bytes": b"K",
         "np_bytes": np.bytes_(b"degK"),
         "cftime": cftime.DatetimeNoLeap(2000, 3, 1),
@@ -440,6 +455,11 @@ def test_to_jsonable_edge_cases():
         "arr0d_num": 3.14,
         "arr0d_str": "degC",
         "arr1d": [1, 2],
+        "td": "6 hours",
+        "td_nat": None,
+        "arr0d_td": "1 days",
+        "arr_dt64": ["2000-01-01", None],
+        "ts_5dig": "10001-02-03",
         "bytes": "K",
         "np_bytes": "degK",
         "cftime": "2000-03-01",
@@ -523,11 +543,46 @@ def test_path_safety_region_and_literal_bracket_filename(tmp_path: Path):
             region={"lon": [10.0, 190.0]},
         )
 
-    # Literal filename containing '[' must not fail glob expansion
+    # Literal filename containing '[' must not fail glob expansion or bypass path guard when sibling exists
     bracket_nc = tmp_path / "sst[v2].nc"
     bracket_nc.write_bytes(paths["cmip"].read_bytes())
+    sibling_nc = tmp_path / "sstv.nc"
+    sibling_nc.write_bytes(b"sibling")
     info_br = mcp_server.inspect_dataset(str(bracket_nc))
     assert info_br["recommended_var"] == "tos"
+
+    det_br = mcp_server.detect_extremes(str(bracket_nc), out=str(tmp_path / "out_bracket.nc"))
+    assert det_br["n_events"] > 0
+    det_sib = mcp_server.detect_extremes(str(bracket_nc), out=str(sibling_nc))
+    assert det_sib["n_events"] == det_br["n_events"]
+    assert sibling_nc.stat().st_size > 100
+
+    # Reject empty path / output / negative sample_limit cleanly
+    with pytest.raises(ValueError, match="non-empty"):
+        mcp_server.inspect_dataset("")
+    with pytest.raises(ValueError, match="non-empty"):
+        mcp_server.detect_extremes("", out=str(tmp_path / "empty_in.nc"))
+    with pytest.raises(ValueError, match="sample_limit"):
+        mcp_server.detect_extremes(str(paths["cmip"]), out=str(tmp_path / "neg_sl.nc"), sample_limit=-1)
+
+    # timedelta64 coordinate must be reported as non-numeric in inspect_dataset and rejected in region slicing
+    td_nc = tmp_path / "with_timedelta_coord.nc"
+    xr.Dataset(
+        {"tos": (("time", "step"), np.ones((5, 3)))},
+        coords={
+            "time": pd.date_range("2000-01-01", periods=5),
+            "step": pd.to_timedelta([0, 1, 2], unit="D"),
+        },
+    ).to_netcdf(td_nc)
+    info_td = mcp_server.inspect_dataset(str(td_nc))
+    assert "min" not in info_td["spatial_coords"]["step"]
+    assert "dtype" in info_td["spatial_coords"]["step"]
+    with pytest.raises(ValueError, match="numeric coordinate"):
+        mcp_server.detect_extremes(
+            str(td_nc),
+            out=str(tmp_path / "bad_td_reg.nc"),
+            region={"step": [0, 1]},
+        )
 
 
 def test_query_events_and_summarize_edge_cases(tmp_path: Path):
@@ -614,7 +669,7 @@ def test_query_events_and_summarize_edge_cases(tmp_path: Path):
             threshold_high=19.0,
             threshold_climatology=18.0,
         )
-        import netCDF4
+        netCDF4 = pytest.importorskip("netCDF4")
 
         with netCDF4.Dataset(out_nan_int, "r+") as nc:
             nc.groups["events"].variables["int_max"][:] = np.nan
@@ -627,13 +682,15 @@ def test_query_events_and_summarize_edge_cases(tmp_path: Path):
         mcp_server.query_events(str(out_empty), sort_by="no_such_col")
 
     # 5-digit cftime noleap roundtrip proves year extraction does not truncate year >= 10000
+    # and by_start_year sorts numerically (9999 before 10000, not lexicographic)
     t_5y = [
         cftime.DatetimeNoLeap(yr, mo, d)
-        for yr in (10000, 10001, 10002)
+        for yr in (9999, 10000, 10001)
         for mo, nd in ((1, 31), (2, 28), (3, 31), (4, 30), (5, 31), (6, 30), (7, 31), (8, 31), (9, 30), (10, 31), (11, 30), (12, 31))
         for d in range(1, nd + 1)
     ]
     arr_cf = np.full(len(t_5y), 20.0)
+    arr_cf[30:45] = 26.0
     arr_cf[365 + 30 : 365 + 45] = 26.0
     cf_nc = tmp_path / "cftime_10000.nc"
     xr.Dataset(
@@ -643,7 +700,7 @@ def test_query_events_and_summarize_edge_cases(tmp_path: Path):
     out_cf = tmp_path / "cftime_res.nc"
     mcp_server.detect_extremes(str(cf_nc), out=str(out_cf), event="high")
     sum_cf = mcp_server.summarize_result(str(out_cf))
-    assert "10001" in sum_cf["by_start_year"]
+    assert list(sum_cf["by_start_year"]) == ["9999", "10000"]
 
 
 def test_skill_markdown_frontmatter():

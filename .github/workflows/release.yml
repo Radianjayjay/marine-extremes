@@ -32,12 +32,21 @@ jobs:
           RELEASE_TAG: ${{ github.event_name == 'release' && github.event.release.tag_name || inputs.release_tag }}
         run: |
           python - <<'PY'
-          import os, tomllib
+          import ast, os, tomllib
           tag = os.environ["RELEASE_TAG"].lstrip("v")
           py_ver = tomllib.load(open("pyproject.toml", "rb"))["project"]["version"]
           rs_ver = tomllib.load(open("Cargo.toml", "rb"))["package"]["version"]
-          print(f"tag={tag}, pyproject={py_ver}, cargo={rs_ver}")
-          assert tag == py_ver == rs_ver, f"Version mismatch: tag={tag}, pyproject={py_ver}, cargo={rs_ver}"
+          tree = ast.parse(open("python/marine_extremes/__init__.py", encoding="utf-8").read())
+          init_ver = next(
+              ast.literal_eval(node.value)
+              for node in tree.body
+              if isinstance(node, ast.Assign)
+              and any(isinstance(t, ast.Name) and t.id == "__version__" for t in node.targets)
+          )
+          print(f"tag={tag}, pyproject={py_ver}, cargo={rs_ver}, init={init_ver}")
+          assert tag == py_ver == rs_ver == init_ver, (
+              f"Version mismatch: tag={tag}, pyproject={py_ver}, cargo={rs_ver}, init={init_ver}"
+          )
           PY
       - name: Run Rust unit tests
         run: cargo test --lib
@@ -46,7 +55,7 @@ jobs:
           python -m pip install --upgrade pip maturin
           maturin build --release --out dist
           WHEEL=$(ls dist/marine_extremes-*.whl)
-          python -m pip install "${WHEEL}[io,dev]"
+          python -m pip install "${WHEEL}[io,mcp,dev]"
           pytest -q
           python examples/quickstart.py
 

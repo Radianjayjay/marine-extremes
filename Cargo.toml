@@ -1,6 +1,6 @@
 [package]
 name = "marine-extremes"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 authors = ["Jie Ren <renjie22@mails.ucas.ac.cn>"]
 license = "MIT"

@@ -4,7 +4,7 @@ build-backend = "maturin"
 
 [project]
 name = "marine-extremes"
-version = "0.1.0"
+version = "0.1.1"
 description = "High-performance, Rust-accelerated detection of marine heatwaves, marine cold spells, and general marine extremes across 1D-4D gridded and multi-calendar datasets."
 readme = "README.md"
 license = { file = "LICENSE" }

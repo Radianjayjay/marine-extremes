@@ -43,6 +43,8 @@ def _to_jsonable(val: Any) -> Any:
         return val
     if isinstance(val, np.bool_):
         return bool(val)
+    if isinstance(val, np.timedelta64):
+        return None if np.isnat(val) else str(val)
     if isinstance(val, (int, np.integer)):
         return int(val)
     if isinstance(val, (float, np.floating)):
@@ -53,9 +55,9 @@ def _to_jsonable(val: Any) -> Any:
     if isinstance(val, np.datetime64):
         return None if np.isnat(val) else str(np.datetime_as_string(val, unit="D"))
     if isinstance(val, pd.Timestamp):
-        return None if pd.isna(val) else val.isoformat()[:10]
+        return None if pd.isna(val) else f"{val.year:04d}-{val.month:02d}-{val.day:02d}"
     if isinstance(val, (dt.date, dt.datetime)):
-        return val.isoformat()[:10]
+        return f"{val.year:04d}-{val.month:02d}-{val.day:02d}"
     if _is_cftime_obj(val):
         return f"{val.year:04d}-{val.month:02d}-{val.day:02d}"
     if isinstance(val, dict):
@@ -63,12 +65,16 @@ def _to_jsonable(val: Any) -> Any:
     if isinstance(val, (list, tuple)):
         return [_to_jsonable(x) for x in val]
     if isinstance(val, np.ndarray):
+        if np.issubdtype(val.dtype, np.datetime64) or np.issubdtype(val.dtype, np.timedelta64):
+            return _to_jsonable(val[()]) if val.ndim == 0 else [_to_jsonable(x) for x in val]
         return _to_jsonable(val.tolist())
     return str(val)
 
 
 def _resolve_input_paths(path: str) -> tuple[list[Path], bool]:
     """Resolve an input file, Zarr store, or glob pattern to concrete existing path(s)."""
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError("Input path must be a non-empty string.")
     p = Path(path)
     if p.exists():
         return [p], False
@@ -96,11 +102,18 @@ def _open_raw_dataset(path: str) -> tuple[xr.Dataset, list[Path]]:
 
 def _validate_output_path(out: str, input_paths: Sequence[Path]) -> None:
     """Reject output paths that overlap input datasets or non-Zarr directories."""
+    if not isinstance(out, str) or not out.strip():
+        raise ValueError("Output path must be a non-empty string.")
     out_p = Path(out)
     out_res = out_p.resolve()
     for in_p in input_paths:
         in_res = in_p.resolve()
-        if out_res == in_res or out_res in in_res.parents or in_res in out_res.parents:
+        if (
+            out_res == in_res
+            or out_res in in_res.parents
+            or in_res in out_res.parents
+            or (out_p.exists() and in_p.exists() and out_p.samefile(in_p))
+        ):
             raise ValueError(
                 f"Output path '{out}' overlaps input dataset path '{in_p}'; choose a different output path."
             )
@@ -187,7 +200,7 @@ def inspect_dataset(
                     continue
                 if c.dims == (d,):
                     arr = np.asarray(c.values)
-                    if np.issubdtype(arr.dtype, np.number) and not np.issubdtype(arr.dtype, np.bool_):
+                    if arr.dtype.kind in ("i", "u", "f"):
                         finite = arr[np.isfinite(arr)]
                         spatial_coords[str(d)] = {
                             "size": int(arr.size),
@@ -277,7 +290,7 @@ def _slice_region(da: xr.DataArray, region: dict[str, list[float]], *, time_dim:
         if dim not in da.coords or da.coords[dim].dims != (dim,):
             raise ValueError(f"Region slicing requires a 1D coordinate matching '{dim}'.")
         vals = np.asarray(da.coords[dim].values)
-        if not np.issubdtype(vals.dtype, np.number) or np.issubdtype(vals.dtype, np.bool_):
+        if vals.dtype.kind not in ("i", "u", "f"):
             raise ValueError(f"Region slicing requires a numeric coordinate for '{dim}', got dtype {vals.dtype}.")
         b0, b1 = float(bounds[0]), float(bounds[1])
         if not (math.isfinite(b0) and math.isfinite(b1)):
@@ -333,6 +346,8 @@ def detect_extremes(
     sample_limit: Annotated[int, _Field(description="Maximum sample event rows returned in response (0..50).")] = 10,
 ) -> dict[str, Any]:
     """Detect MHW/MCS/marine extreme events, write one self-contained file to ``out``, and return a compact summary."""
+    if int(sample_limit) < 0:
+        raise ValueError(f"sample_limit must be >= 0, got {sample_limit}")
     base = _build_baseline(
         baseline_type,
         baseline_start,
@@ -344,11 +359,11 @@ def detect_extremes(
         threshold_low,
         threshold_climatology,
     )
-    input_paths, _ = _resolve_input_paths(path)
-    _validate_output_path(out, input_paths)
     det_period = (detect_start, detect_end) if (detect_start is not None or detect_end is not None) else None
 
     with _MCP_IO_LOCK:
+        input_paths, _ = _resolve_input_paths(path)
+        _validate_output_path(out, input_paths)
         raw_ds: xr.Dataset | None = None
         res: mx.DetectResult | None = None
         try:
@@ -461,7 +476,7 @@ def _filter_events_df(
 
 def query_events(
     result_path: Annotated[str, _Field(description="Saved marine-extremes output file (.nc, .mat, .zarr, .npz, .parquet, .feather, .csv).")],
-    coords: Annotated[dict[str, Any] | None, _Field(description="Exact physical coordinates per spatial dim for O(1) CSR lookup (e.g., {'lat': -30.0, 'lon': 150.0}).")] = None,
+    coords: Annotated[dict[str, Any] | None, _Field(description="Physical coordinates per spatial dim for O(1) CSR lookup (nearest match for numeric coords, exact for string coords; e.g., {'lat': -30.0, 'lon': 150.0}).")] = None,
     indices: Annotated[dict[str, int] | None, _Field(description="Zero-based integer indices per spatial dim for O(1) CSR lookup.")] = None,
     event_type: Annotated[Literal["high", "low", "mhw", "mcs", "both"] | None, _Field(description="Filter by event direction ('high'/'mhw', 'low'/'mcs', or 'both').")] = None,
     min_duration: int | None = None,
@@ -617,8 +632,8 @@ def summarize_result(
                 "n_events": n_total,
                 "spatial_counts": spatial_counts,
                 "by_event_type": by_type,
-                "by_category_max": dict(sorted(by_cat.items())),
-                "by_start_year": dict(sorted(by_year.items())),
+                "by_category_max": dict(sorted(by_cat.items(), key=lambda kv: int(kv[0]))),
+                "by_start_year": dict(sorted(by_year.items(), key=lambda kv: int(kv[0]))),
                 "duration": {
                     "min": dur_min,
                     "mean": (dur_sum / n_total) if n_total > 0 else None,

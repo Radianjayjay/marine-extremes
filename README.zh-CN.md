@@ -49,8 +49,6 @@ pip install "marine-extremes[io]"
 - `marine-extremes[io]`：上述数据后端全集（`netcdf`、`mat`、`zarr`、`cf`）
 - `marine-extremes[dev]`：`pytest`、`maturin`
 
-> **说明：** 当前 PyPI 预编译版本为 `0.1.0`。CF 元数据解析（`[cf]`）、Agent Skill 与 MCP 服务（`[mcp]`、`marine-extremes-mcp`）目前位于 GitHub `main` 分支（可通过下方源码编译，或执行 `pip install "marine-extremes[io,mcp] @ git+https://github.com/Radianjayjay/marine-extremes.git"` 安装），将在下一版 PyPI 中同步发布。
-
 从源码编译安装（需本机 Rust 工具链）：
 
 ```bash
@@ -107,7 +105,7 @@ python examples/quickstart.py
 
 ### Agent Skill 与可直接复制的提示词（推荐用于编程 Agent）
 
-对于可运行本地 Python 的编程 Agent（Claude Code、Codex、Cursor、Antigravity、Windsurf、OpenCode 等），安装 `marine-extremes[io]`（使用最新 CF 识别建议从 `main` 安装）并将通用 Skill 文件 [skills/marine-extremes/SKILL.md](skills/marine-extremes/SKILL.md) 放入你的 skills 目录：
+对于可运行本地 Python 的编程 Agent（Claude Code、Codex、Cursor、Antigravity、Windsurf、OpenCode 等），安装 `marine-extremes[io]` 并将通用 Skill 文件 [skills/marine-extremes/SKILL.md](skills/marine-extremes/SKILL.md) 放入你的 skills 目录：
 
 ```bash
 # 示例：安装到 Claude Code / Codex 用户级 skills 目录（按实际工具保留对应目录）
@@ -129,7 +127,11 @@ cp skills/marine-extremes/SKILL.md ~/.codex/skills/marine-extremes/SKILL.md
 
 ### 可选本地 stdio MCP 服务（供桌面端/对话式 AI 客户端使用）
 
-安装 `[mcp]` 扩展（目前通过 `main` 分支源码 `maturin develop --release --extras io,mcp` 安装；下一版 PyPI 发布后可直接 `pip install "marine-extremes[io,mcp]"`），然后在支持 MCP 的客户端（如 Claude Desktop、Cherry Studio 等）中填入以下配置：
+```bash
+pip install "marine-extremes[io,mcp]"
+```
+
+在支持 MCP 的客户端（如 Claude Desktop、Cherry Studio 等）中填入以下配置：
 
 ```json
 {
@@ -256,7 +258,7 @@ marine-extremes/
 ├── docs/
 │   ├── figures/                      # 双语 README 性能与精度对比图表
 │   └── marine_extremes_overview.html # 交互式图文架构总览页面
-└── .github/workflows/ci.yml          # 多 Python 版本 CI 与跨平台 wheel 构建流程
+└── .github/workflows/                # 多 Python 版本 CI 与跨平台 PyPI 自动发布流程
 ```
 
 ## 适用范围
@@ -303,13 +305,13 @@ python benchmarks/bench_global_scale.py
 
 若你在学术论文或业务工作流中使用了 `marine-extremes`，请在引用基础方法学文献（如 Hobday et al., 2016；Hobday et al., 2018；Schlegel et al., 2021）的同时引用本软件包：
 
-> Ren, J. (2026). *marine-extremes: Rust-accelerated detection of marine heatwaves, marine cold spells, and marine extremes* (Version 0.1.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.24579203
+> Ren, J. (2026). *marine-extremes: Rust-accelerated detection of marine heatwaves, marine cold spells, and marine extremes* (Version 0.1.1) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.24579203
 
 ```bibtex
 @software{marine_extremes,
   author    = {Ren, Jie},
   title     = {marine-extremes: Rust-accelerated detection of marine heatwaves, marine cold spells, and marine extremes},
-  version   = {0.1.0},
+  version   = {0.1.1},
   year      = {2026},
   publisher = {Zenodo},
   doi       = {10.5281/zenodo.24579203},

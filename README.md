@@ -49,8 +49,6 @@ Optional dependency groups in [pyproject.toml](https://github.com/Radianjayjay/m
 - `marine-extremes[io]`: all of the above (`netcdf`, `mat`, `zarr`, `cf`)
 - `marine-extremes[dev]`: `pytest`, `maturin`
 
-> **Note:** Prebuilt PyPI wheels currently host `0.1.0`. The CF metadata resolver (`[cf]`), Agent Skill, and MCP server (`[mcp]`, `marine-extremes-mcp`) are on `main` (install from source below, or via `pip install "marine-extremes[io,mcp] @ git+https://github.com/Radianjayjay/marine-extremes.git"`) until the next PyPI release.
-
 To build from source instead (requires a Rust toolchain):
 
 ```bash
@@ -107,7 +105,7 @@ python examples/quickstart.py
 
 ### Agent Skill & copy-paste prompts (recommended for coding agents)
 
-For agents that can run local Python (Claude Code, Codex, Cursor, Antigravity, Windsurf, OpenCode), install `marine-extremes[io]` (from `main` for the latest CF support) and install the universal skill file [skills/marine-extremes/SKILL.md](https://github.com/Radianjayjay/marine-extremes/blob/main/skills/marine-extremes/SKILL.md):
+For agents that can run local Python (Claude Code, Codex, Cursor, Antigravity, Windsurf, OpenCode), install `marine-extremes[io]` and install the universal skill file [skills/marine-extremes/SKILL.md](https://github.com/Radianjayjay/marine-extremes/blob/main/skills/marine-extremes/SKILL.md):
 
 ```bash
 # Example: install for Claude Code or Codex user skills (keep whichever path matches your tool)
@@ -129,7 +127,11 @@ Once the Skill (or MCP server below) is configured, you can ask in plain natural
 
 ### Optional stdio MCP server (for desktop/chat AI clients)
 
-Install the `[mcp]` extra (currently from `main` via `maturin develop --release --extras io,mcp`, or `pip install "marine-extremes[io,mcp]"` once the next PyPI release is published), then register the local stdio server in your MCP client config:
+```bash
+pip install "marine-extremes[io,mcp]"
+```
+
+Register the local stdio server in your MCP client config:
 
 ```json
 {
@@ -256,7 +258,7 @@ marine-extremes/
 ├── docs/
 │   ├── figures/                      # Bilingual README speed & accuracy figures
 │   └── marine_extremes_overview.html # Interactive illustrated HTML overview
-└── .github/workflows/ci.yml          # Multi-Python CI & cross-platform wheel builds
+└── .github/workflows/                # Multi-Python CI & cross-platform PyPI release workflows
 ```
 
 ## Scope
@@ -303,13 +305,13 @@ Bug fixes, calendar or I/O adapters, parity tests, and documentation edits are w
 
 If you use `marine-extremes` in research or operational work, cite the package alongside the underlying methodology papers (for example Hobday et al., 2016; Hobday et al., 2018; Schlegel et al., 2021):
 
-> Ren, J. (2026). *marine-extremes: Rust-accelerated detection of marine heatwaves, marine cold spells, and marine extremes* (Version 0.1.0) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.24579203
+> Ren, J. (2026). *marine-extremes: Rust-accelerated detection of marine heatwaves, marine cold spells, and marine extremes* (Version 0.1.1) [Computer software]. Zenodo. https://doi.org/10.5281/zenodo.24579203
 
 ```bibtex
 @software{marine_extremes,
   author    = {Ren, Jie},
   title     = {marine-extremes: Rust-accelerated detection of marine heatwaves, marine cold spells, and marine extremes},
-  version   = {0.1.0},
+  version   = {0.1.1},
   year      = {2026},
   publisher = {Zenodo},
   doi       = {10.5281/zenodo.24579203},

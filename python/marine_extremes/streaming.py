@@ -131,7 +131,10 @@ def open_data_input(
             )
         elif isinstance(data, (str, Path)):
             p_str = str(data)
-            if any(ch in p_str for ch in ("*", "?", "[")):
+            if not p_str.strip():
+                raise ValueError("Input path must be a non-empty string.")
+            p = Path(p_str)
+            if not p.exists() and any(ch in p_str for ch in ("*", "?", "[")):
                 paths = sorted(glob_mod.glob(p_str))
                 if not paths:
                     raise FileNotFoundError(f"No files matched glob pattern: {p_str!r}")
@@ -142,7 +145,6 @@ def open_data_input(
                 closers.append(ds)
                 da = select_dataset_var(ds, var, time_dim=time_dim)
             else:
-                p = Path(p_str)
                 if not p.exists():
                     raise FileNotFoundError(f"Input path does not exist: {p}")
                 if p.is_dir() or p.suffix == ".zarr":
