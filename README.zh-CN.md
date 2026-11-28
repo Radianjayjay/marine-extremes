@@ -24,6 +24,7 @@
 - CMIP6 多日历与月尺度模式。支持公历及 `cftime` 日历（`standard`、`proleptic_gregorian`、`noleap`/`365_day`、`360_day`、`all_leap`/`366_day`），也支持 `freq="monthly"` 月尺度检测（Jacox et al., 2020）。
 - 显式跨工具兼容预设。通过 `compat="standard"`、`"m_mhw"`、`"m_mhw_python"`、`"oliver"` 或 `"heatwaveR"` 指定分位数插值、阈值不等号、2 月 29 日插值与方差自由度 `ddof`，与主流工具逐项对齐。
 - 边缘与海冰区保护。支持仅用于检测阶段的 `max_pad_length` 短缺测插值、`min_valid_fraction` 海冰边缘过滤（循环平滑阶段不产生 NaN 渗透）、`truncated_start`/`truncated_end` 截断标记，以及 `lower_bound`（`flag`/`mask`/`floor` 及除零保护）。
+- CF 元数据自动识别。内置轻量 CF 解析器（支持可选 `cf-xarray` 增强），自动推断非 `time` 时间维（如 `valid_time`、`time_counter`、`ocean_time`），过滤 `*_bnds`/`grid_mapping`/`ancillary_variables` 等辅助变量，支持按 `standard_name` 或海洋变量别名选参，并在开尔文/摄氏度与 `lower_bound` 冲突时发出提醒。
 
 ## 安装
 
@@ -33,7 +34,7 @@
 # 核心包（NumPy、Pandas、PyArrow、Xarray）
 pip install marine-extremes
 
-# 推荐：附带全部 I/O 后端（NetCDF4、HDF5/MAT、Zarr、cftime、Dask）
+# 推荐：附带全部 I/O 后端（NetCDF4、HDF5/MAT、Zarr、cftime、Dask、cf-xarray）
 pip install "marine-extremes[io]"
 ```
 
@@ -42,6 +43,7 @@ pip install "marine-extremes[io]"
 - `marine-extremes[netcdf]`：`netCDF4`、`h5netcdf`、`cftime`、`dask`
 - `marine-extremes[mat]`：`h5py`、`scipy`（MATLAB v7.3 与 v5 `.mat`）
 - `marine-extremes[zarr]`：`zarr>=3.0`、`cftime`、`dask`
+- `marine-extremes[cf]`：`cf-xarray`（可选 CF accessor 与自定义准则增强）
 - `marine-extremes[io]`：以上全部格式支持
 - `marine-extremes[dev]`：`pytest`、`maturin`
 
@@ -177,6 +179,7 @@ marine-extremes/
 │   ├── baselines.py                  # 基线规格定义与 PreparedBaseline 执行适配器
 │   ├── calendar.py                   # 公历/cftime 统一编码、时段切片与日期/CF 时间编解码
 │   ├── catalog.py                    # 规范 EventSchema、EventStore 抽象与 CSR 索引 EventCatalog
+│   ├── cf.py                         # 内置轻量 CF 解析与可选 cf-xarray 增强
 │   ├── compat.py                     # 跨工具数值兼容预设
 │   ├── io_formats.py                 # OutputSpec、ResultSink 抽象与 8 套单文件格式适配器
 │   ├── result.py                     # DetectResult 结果容器（save、to_mat、open、to_dataset）

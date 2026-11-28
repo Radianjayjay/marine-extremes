@@ -14,6 +14,8 @@ import numpy as np
 import pandas as pd
 import xarray as xr
 
+from marine_extremes.cf import resolve_time_dim, select_dataset_var
+
 _MEM_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([kmgt]?i?b?)?\s*$", re.IGNORECASE)
 _MEM_UNITS = {
     "": 1,
@@ -74,41 +76,28 @@ class OpenedInput:
         self.closers.clear()
 
 
-def _select_var_from_dataset(ds: xr.Dataset, var: str | None) -> xr.DataArray:
-    """Select the requested variable (or the sole variable when ``var`` is omitted)."""
-    if var is not None:
-        if var not in ds.data_vars:
-            raise KeyError(f"Variable '{var}' not found in dataset. Available: {list(ds.data_vars)}")
-        return ds[var]
-    data_vars = list(ds.data_vars)
-    if len(data_vars) == 1:
-        return ds[data_vars[0]]
-    raise ValueError(
-        f"Dataset has multiple variables {data_vars}; pass `var=...` explicitly."
-    )
-
-
 def open_data_input(
     data: Any,
     *,
     var: str | None = None,
     time: Any | None = None,
-    time_dim: str = "time",
+    time_dim: str | None = "auto",
     squeeze_singleton: bool | str | Sequence[str] = False,
 ) -> OpenedInput:
     """Normalize 1D/3D/4D/N-D inputs (ndarray, Series, DataArray, Dataset, paths, globs)."""
     closers: list[Any] = []
+    synth_time_dim = "time" if (time_dim is None or time_dim == "auto") else str(time_dim)
     try:
         if isinstance(data, xr.DataArray):
             da = data
         elif isinstance(data, xr.Dataset):
-            da = _select_var_from_dataset(data, var)
+            da = select_dataset_var(data, var, time_dim=time_dim)
         elif isinstance(data, pd.Series):
             t_vals = time if time is not None else data.index
             da = xr.DataArray(
                 data.to_numpy(dtype=np.float64),
-                dims=(time_dim,),
-                coords={time_dim: t_vals},
+                dims=(synth_time_dim,),
+                coords={synth_time_dim: t_vals},
                 name=data.name or var or "value",
             )
         elif isinstance(data, (str, Path)):
@@ -122,7 +111,7 @@ def open_data_input(
                     mf_kw.update(engine="zarr", consolidated=False)
                 ds = xr.open_mfdataset(paths, **mf_kw)
                 closers.append(ds)
-                da = _select_var_from_dataset(ds, var)
+                da = select_dataset_var(ds, var, time_dim=time_dim)
             else:
                 p = Path(p_str)
                 if not p.exists():
@@ -132,7 +121,7 @@ def open_data_input(
                 else:
                     ds = xr.open_dataset(p)
                 closers.append(ds)
-                da = _select_var_from_dataset(ds, var)
+                da = select_dataset_var(ds, var, time_dim=time_dim)
         elif isinstance(data, Sequence) and not isinstance(data, (bytes, bytearray)) and len(data) == 0:
             raise ValueError("Input data sequence is empty.")
         elif isinstance(data, Sequence) and not isinstance(data, (bytes, bytearray)) and isinstance(data[0], (str, Path)):
@@ -142,7 +131,7 @@ def open_data_input(
                 mf_kw.update(engine="zarr", consolidated=False)
             ds = xr.open_mfdataset(paths, **mf_kw)
             closers.append(ds)
-            da = _select_var_from_dataset(ds, var)
+            da = select_dataset_var(ds, var, time_dim=time_dim)
         else:
             arr = np.asarray(data)
             if arr.ndim == 0:
@@ -156,7 +145,7 @@ def open_data_input(
             if arr.ndim == 1:
                 if arr.shape[0] != n_t:
                     raise ValueError(f"1D array length {arr.shape[0]} != len(time) {n_t}")
-                da = xr.DataArray(arr, dims=(time_dim,), coords={time_dim: t_arr}, name=var or "value")
+                da = xr.DataArray(arr, dims=(synth_time_dim,), coords={synth_time_dim: t_arr}, name=var or "value")
             else:
                 # Auto-detect whether time is axis 0 (Python/CF) or axis -1 (MATLAB m_mhw)
                 if arr.shape[0] == n_t:
@@ -171,25 +160,24 @@ def open_data_input(
                 spatial_i = 0
                 for ax in range(arr.ndim):
                     if ax == t_axis:
-                        dims.append(time_dim)
+                        dims.append(synth_time_dim)
                     else:
                         dims.append(f"dim_{spatial_i}")
                         spatial_i += 1
-                coords: dict[str, Any] = {time_dim: t_arr}
+                coords: dict[str, Any] = {synth_time_dim: t_arr}
                 for ax, dname in enumerate(dims):
-                    if dname != time_dim:
+                    if dname != synth_time_dim:
                         coords[dname] = np.arange(arr.shape[ax], dtype=np.int64)
                 da = xr.DataArray(arr, dims=tuple(dims), coords=coords, name=var or "value")
 
-        if time_dim not in da.dims:
-            raise ValueError(f"Time dimension '{time_dim}' not found in data dims {da.dims}")
+        resolved_time_dim = resolve_time_dim(da, time_dim)
 
         if squeeze_singleton is True:
-            drop_dims = [d for d in da.dims if d != time_dim and da.sizes[d] == 1]
+            drop_dims = [d for d in da.dims if d != resolved_time_dim and da.sizes[d] == 1]
             if drop_dims:
                 da = da.squeeze(drop_dims, drop=True)
         elif isinstance(squeeze_singleton, str):
-            if squeeze_singleton in da.dims and squeeze_singleton != time_dim:
+            if squeeze_singleton in da.dims and squeeze_singleton != resolved_time_dim:
                 if da.sizes[squeeze_singleton] != 1:
                     raise ValueError(
                         f"Cannot squeeze dim '{squeeze_singleton}' of size {da.sizes[squeeze_singleton]} != 1"
@@ -198,25 +186,25 @@ def open_data_input(
         elif isinstance(squeeze_singleton, Sequence) and not isinstance(squeeze_singleton, (bytes, bytearray)):
             to_drop = []
             for d in squeeze_singleton:
-                if d in da.dims and d != time_dim:
+                if d in da.dims and d != resolved_time_dim:
                     if da.sizes[d] != 1:
                         raise ValueError(f"Cannot squeeze dim '{d}' of size {da.sizes[d]} != 1")
                     to_drop.append(d)
             if to_drop:
                 da = da.squeeze(to_drop, drop=True)
 
-        spatial_dims = tuple(d for d in da.dims if d != time_dim)
+        spatial_dims = tuple(d for d in da.dims if d != resolved_time_dim)
         spatial_shape = tuple(int(da.sizes[d]) for d in spatial_dims)
         spatial_coords: dict[str, np.ndarray] = {}
         for d in spatial_dims:
-            if d in da.coords:
+            if d in da.coords and da.coords[d].ndim == 1 and da.coords[d].dims == (d,):
                 spatial_coords[d] = np.asarray(da.coords[d].values)
             else:
                 spatial_coords[d] = np.arange(da.sizes[d], dtype=np.int64)
 
         return OpenedInput(
             da=da,
-            time_dim=time_dim,
+            time_dim=resolved_time_dim,
             spatial_dims=spatial_dims,
             spatial_shape=spatial_shape,
             spatial_coords=spatial_coords,

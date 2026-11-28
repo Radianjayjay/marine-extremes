@@ -24,6 +24,7 @@ An interactive architecture walkthrough is available in [docs/marine_extremes_ov
 - Multi-calendar and monthly support. Handles Gregorian and CMIP6 `cftime` calendars (`standard`, `proleptic_gregorian`, `noleap`/`365_day`, `360_day`, `all_leap`/`366_day`) as well as `freq="monthly"` detection (Jacox et al., 2020).
 - Explicit cross-tool compatibility profiles. Choose `compat="standard"`, `"m_mhw"`, `"m_mhw_python"`, `"oliver"`, or `"heatwaveR"` to match the quantile rule, threshold inequality, Feb 29 handling, and variance `ddof` of a specific reference tool.
 - Edge and sea-ice safeguards. Includes detection-only `max_pad_length`, `min_valid_fraction` filtering (without NaN bleed during circular smoothing), `truncated_start`/`truncated_end` flags, and `lower_bound` handling (`flag`, `mask`, or `floor` with zero-division protection).
+- CF-aware input resolution. Built-in lightweight CF metadata resolver (with optional `cf-xarray` enhancement) infers non-`time` time dimensions (`valid_time`, `time_counter`, `ocean_time`), filters `*_bnds`/`grid_mapping`/`ancillary_variables`, resolves CF `standard_name` and marine aliases, and warns on Kelvin vs. Celsius `lower_bound` mismatches.
 
 ## Installation
 
@@ -33,7 +34,7 @@ Install prebuilt wheels from PyPI (no Rust toolchain required on Linux, macOS, o
 # Core package (NumPy, Pandas, PyArrow, Xarray)
 pip install marine-extremes
 
-# Recommended: include all I/O backends (NetCDF4, HDF5/MAT, Zarr, cftime, Dask)
+# Recommended: include all I/O backends (NetCDF4, HDF5/MAT, Zarr, cftime, Dask, cf-xarray)
 pip install "marine-extremes[io]"
 ```
 
@@ -42,6 +43,7 @@ Optional dependency groups in [pyproject.toml](https://github.com/Radianjayjay/m
 - `marine-extremes[netcdf]`: `netCDF4`, `h5netcdf`, `cftime`, `dask`
 - `marine-extremes[mat]`: `h5py`, `scipy` (MATLAB v7.3 and v5 `.mat`)
 - `marine-extremes[zarr]`: `zarr>=3.0`, `cftime`, `dask`
+- `marine-extremes[cf]`: `cf-xarray` (optional CF accessor & custom criteria enhancement)
 - `marine-extremes[io]`: all of the above
 - `marine-extremes[dev]`: `pytest`, `maturin`
 
@@ -177,6 +179,7 @@ marine-extremes/
 │   ├── baselines.py                  # Baseline specifications & PreparedBaseline adapters
 │   ├── calendar.py                   # Unified Gregorian/cftime encoding, period slicing & date/CF-time codecs
 │   ├── catalog.py                    # Canonical EventSchema, EventStore seam & CSR grid-indexed EventCatalog
+│   ├── cf.py                         # Built-in lightweight CF resolver & optional cf-xarray enhancement
 │   ├── compat.py                     # Cross-tool compatibility presets
 │   ├── io_formats.py                 # OutputSpec, ResultSink seam & 8 single-file format adapters
 │   ├── result.py                     # DetectResult container (save, to_mat, open, to_dataset)

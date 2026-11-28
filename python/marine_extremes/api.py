@@ -22,6 +22,7 @@ from marine_extremes.baselines import (
     run_climatology_only,
 )
 from marine_extremes.calendar import datetime64_resolution, effective_feb29_mode, encode_time_axis
+from marine_extremes.cf import warn_if_units_mismatch
 from marine_extremes.compat import CompatProfile, resolve_compat
 from marine_extremes.io_formats import (
     GRID_CAPABLE_FORMATS,
@@ -136,7 +137,7 @@ def compute_climatology(
     *,
     var: str | None = None,
     time: Any | None = None,
-    time_dim: str = "time",
+    time_dim: str | None = "auto",
     squeeze_singleton: bool | str | Sequence[str] = False,
     baseline: BaselineSpec | tuple[Any, Any] | None = None,
     pctile_high: float | None = 0.90,
@@ -200,7 +201,7 @@ def detect(
     *,
     var: str | None = None,
     time: Any | None = None,
-    time_dim: str = "time",
+    time_dim: str | None = "auto",
     squeeze_singleton: bool | str | Sequence[str] = False,
     event: str = "high",
     baseline: BaselineSpec | tuple[Any, Any] | None = None,
@@ -260,6 +261,7 @@ def detect(
     prepared = None
     sink = None
     try:
+        warn_if_units_mismatch(opened.da, lower_bound, stacklevel=3)
         tile_dtype = resolve_working_dtype(opened.da, working_dtype)
         cal_full = encode_time_axis(opened.da.coords[opened.time_dim], freq=freq, calendar=calendar)
         det_start, det_end = detect_period if detect_period is not None else (None, None)

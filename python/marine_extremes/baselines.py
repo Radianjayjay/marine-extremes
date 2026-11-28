@@ -12,6 +12,7 @@ import xarray as xr
 
 from marine_extremes import _core
 from marine_extremes.calendar import CalendarInfo, build_period_mask, effective_feb29_mode, encode_time_axis
+from marine_extremes.cf import cf_auxiliary_vars, resolve_time_dim
 from marine_extremes.compat import CompatProfile
 from marine_extremes.streaming import (
     OpenedInput,
@@ -147,7 +148,7 @@ class RunContext:
     freq: Literal["daily", "monthly"]
     calendar: str | None
     var: str | None
-    time_dim: str
+    time_dim: str | None
     squeeze_singleton: bool | str | Sequence[str]
     ev_mode: Literal["high", "low", "both"]
     event_raw: str
@@ -267,6 +268,10 @@ def _open_external_clim_array(
                 return ds[hint], [ds]
         if len(ds.data_vars) == 1:
             return ds[next(iter(ds.data_vars))], [ds]
+        aux = cf_auxiliary_vars(ds)
+        primary = [str(v) for v in ds.data_vars if str(v) not in aux]
+        if len(primary) == 1:
+            return ds[primary[0]], [ds]
         raise KeyError(f"Could not find any of {var_hints} in external climatology file {p}")
     except BaseException:
         try:
@@ -848,6 +853,7 @@ class _PreparedExternalClimatology(PreparedBaseline):
             ref = self._seas if self._seas is not None else (self._hi if self._hi is not None else self._lo)
             self._doy_idx: np.ndarray | None = None
             self._yd_maps: dict[str, tuple[np.ndarray, int]] = {}
+            self._ext_time_dim: str = ctx.opened.time_dim
             sp_dims, sp_shape = ctx.opened.spatial_dims, ctx.opened.spatial_shape
             yl = ctx.cal_full.year_len
             n_det = int(ctx.cal_det.years.size)
@@ -862,18 +868,31 @@ class _PreparedExternalClimatology(PreparedBaseline):
                     ymap = _index_year_coord(obj, ctx.cal_det.years) if isinstance(obj, xr.DataArray) and "year" in obj.dims else ref_map
                     self._yd_maps[key] = ymap
                     _validate_external_clim_spec(obj, sp_dims, sp_shape, ("year", "doy"), (ymap[1], yl))
-            elif isinstance(ref, xr.DataArray) and ctx.opened.time_dim in ref.dims:
-                self._mode = "time"
-                n_full_t = int(ctx.cal_full.years.size)
-                for obj in (self._seas, self._hi, self._lo):
-                    _validate_external_clim_spec(
-                        obj, sp_dims, sp_shape, (ctx.opened.time_dim,), (n_det,),
-                        time_dim=ctx.opened.time_dim, n_full_time=n_full_t,
-                    )
             else:
-                self._mode = "doy"
-                for obj in (self._seas, self._hi, self._lo):
-                    _validate_external_clim_spec(obj, sp_dims, sp_shape, ("doy",), (yl,))
+                ext_t_dim: str | None = None
+                if isinstance(ref, xr.DataArray) and "doy" not in ref.dims:
+                    if ctx.opened.time_dim in ref.dims:
+                        ext_t_dim = ctx.opened.time_dim
+                    else:
+                        try:
+                            cand = resolve_time_dim(ref, "auto")
+                        except ValueError:
+                            cand = None
+                        if cand is not None and cand not in sp_dims:
+                            ext_t_dim = str(cand)
+                if ext_t_dim is not None:
+                    self._mode = "time"
+                    self._ext_time_dim = ext_t_dim
+                    n_full_t = int(ctx.cal_full.years.size)
+                    for obj in (self._seas, self._hi, self._lo):
+                        _validate_external_clim_spec(
+                            obj, sp_dims, sp_shape, (ext_t_dim,), (n_det,),
+                            time_dim=ext_t_dim, n_full_time=n_full_t,
+                        )
+                else:
+                    self._mode = "doy"
+                    for obj in (self._seas, self._hi, self._lo):
+                        _validate_external_clim_spec(obj, sp_dims, sp_shape, ("doy",), (yl,))
 
             self._plan = _core.CurvesPlan(
                 ctx.ev_mode,
@@ -933,17 +952,17 @@ class _PreparedExternalClimatology(PreparedBaseline):
             s_c, h_c, l_c = _map_yd("seas", self._seas), _map_yd("hi", self._hi), _map_yd("lo", self._lo)
         else:
             n_full_t = int(ctx.cal_full.years.size)
-            kw = dict(time_dim=ctx.opened.time_dim, time_slice=ctx.det_slice, n_full_time=n_full_t)
+            kw = dict(time_dim=self._ext_time_dim, time_slice=ctx.det_slice, n_full_time=n_full_t)
             s_c = np.ascontiguousarray(
-                _extract_external_clim_tile(self._seas, tile, sp_dims, sp_shape, (ctx.opened.time_dim,), (n_det,), **kw)[active_local],
+                _extract_external_clim_tile(self._seas, tile, sp_dims, sp_shape, (self._ext_time_dim,), (n_det,), **kw)[active_local],
                 dtype=np.float64,
             )
             h_c = np.ascontiguousarray(
-                _extract_external_clim_tile(self._hi, tile, sp_dims, sp_shape, (ctx.opened.time_dim,), (n_det,), **kw)[active_local],
+                _extract_external_clim_tile(self._hi, tile, sp_dims, sp_shape, (self._ext_time_dim,), (n_det,), **kw)[active_local],
                 dtype=np.float64,
             )
             l_c = np.ascontiguousarray(
-                _extract_external_clim_tile(self._lo, tile, sp_dims, sp_shape, (ctx.opened.time_dim,), (n_det,), **kw)[active_local],
+                _extract_external_clim_tile(self._lo, tile, sp_dims, sp_shape, (self._ext_time_dim,), (n_det,), **kw)[active_local],
                 dtype=np.float64,
             )
 
