@@ -103,9 +103,9 @@ python examples/quickstart.py
 
 ## 结合 AI Agent 使用（Skill 与 MCP）
 
-### Agent Skill 与可直接复制的提示词（推荐用于编程 Agent）
+### Agent Skill（推荐用于编程 Agent）
 
-如果编程 Agent 可以运行本地 Python（如 Claude Code、Codex、Cursor、Antigravity、Windsurf、OpenCode），安装 `marine-extremes[io]` 后，把 [skills/marine-extremes/SKILL.md](skills/marine-extremes/SKILL.md) 复制到对应的 skills 目录即可。若未提前指定参数，Skill 会先自动探测数据集，再通过交互式选择题卡片（无弹窗工具时退化为编号文本选项）引导确认 `mx.detect(...)` 配置，包括气候态基线（30 年固定、30/31 年中心滑动、11 年中心滑动或去趋势）、`compat` 口径、物理边界、精度与输出格式，并兼顾海洋数据核对（多变量文件显式指定 `var`、开尔文与摄氏度 `lower_bound` 核对、压缩单长度维和流式落盘）：
+如果你的编程 Agent 可以运行本地 Python（如 Claude Code、Codex、Cursor、Antigravity、Windsurf、OpenCode），安装 `marine-extremes[io]` 后，把 [skills/marine-extremes/SKILL.md](skills/marine-extremes/SKILL.md) 放进对应工具的 skills 目录即可：
 
 ```bash
 # 从本地仓库复制（按实际使用的工具保留对应目录）
@@ -118,27 +118,25 @@ curl -fsSL https://raw.githubusercontent.com/Radianjayjay/marine-extremes/main/s
   -o ~/.claude/skills/marine-extremes/SKILL.md
 ```
 
-如果暂不安装 Skill 文件，可以直接把下面这段提示词发给编程 Agent：
+装好之后直接说人话就行，不需要手写一堆参数名：
 
-```text
-请使用 Python 库 `marine-extremes`（`import marine_extremes as mx`）对 <数据路径> 识别海洋热浪（MHW）与海洋冷事件（MCS）。
-先检查变量与单位（OISST 传 `var="sst", squeeze_singleton="zlev"`；OSTIA/ERA5 开尔文数据先转摄氏度再用 `lower_bound=-1.8`）。
-大网格务必指定 `out="<输出>.nc"`、`working_dtype="auto"`、`intensity_dtype="float32"`、`memory_limit="4GB"`，单点查表用 `res.events.sel(...)` / `count_map()`。
-```
+> “请使用 Python 库 `marine-extremes`，帮我识别 MHW 和 MCS。我的 SST 文件（或按年拆分的 nc 文件夹）在 `data/sst_*.nc`，输出为 `.nc`（或 `.zarr` / `.mat` / `.npz`）文件保存到 `outputs/`。”
 
-配好 Skill 或下方 MCP 服务后，可以直接用自然语言提问，例如：
+发送之后，Agent 会先读取你的数据文件（变量名、单位、单长度维和时间范围），再弹出选择题卡片（客户端不支持弹窗时改为简短编号选项）逐项让你确认：气候态基线选 30 年固定、30/31 年中心滑动、11 年中心滑动还是去趋势，是否对齐某款已有工具口径（`compat`），冰点保护、存储精度与输出格式怎么选，最后自动填好 `mx.detect(...)` 并执行。如果你在提问里已经把参数说全，或明确说“按默认直接跑”，则会跳过提问直接运行。
 
-> “帮我先检查 `sst.day.mean.*.nc` 的变量和单位，再用 1982-2011 基准做 MHW+MCS 双事件检测并保存到 `outputs/oisst.nc`，最后列出 (-42.5, 148.0) 附近持续时间最长的前 5 个事件。”
+如果暂不安装 Skill 文件，也可以直接发一段简短指令，让 Agent 先查数据再问你：
+
+> “请用 Python 库 `marine-extremes`（`import marine_extremes as mx`）帮我识别 `data/sst_*.nc` 中的 MHW 和 MCS，结果保存到 `outputs/`。先检查文件里的变量名、单位和时间跨度，再把气候态基线、兼容口径和输出格式列成选项让我选，确认后再运行。”
 
 ### 可选本地 stdio MCP 服务（供桌面端/对话式 AI 客户端使用）
 
-安装可选 `mcp` 依赖（兼容 MCP Python SDK v1 与 v2）：
+如果所用 AI 客户端不能直接执行本地 Python 脚本（如 Claude Desktop、Cherry Studio），可以安装可选 `mcp` 依赖（兼容 MCP Python SDK v1 与 v2）：
 
 ```bash
 pip install "marine-extremes[io,mcp]"
 ```
 
-在支持 MCP 的客户端（如 Claude Desktop、Cherry Studio）中填入以下配置：
+在客户端 MCP 配置中加入：
 
 ```json
 {
@@ -167,7 +165,7 @@ pip install "marine-extremes[io,mcp]"
 | --- | --- |
 | `inspect_dataset` | 检测前查看变量名、维度与 1D 坐标范围（提示多维曲线坐标）、CF 时间日历、单长度维，以及开尔文/摄氏度提醒。 |
 | `detect_extremes` | 按固定、去趋势、滑动或物理阈值基线流式检测（支持 1D `region` 区域裁剪），将结果写入单个 `out` 文件，返回紧凑元数据、警告与最多 50 条样本行，并阻止覆盖输入文件或非 Zarr 目录。 |
-| `query_events` | 通过 CSR 索引按 `coords`（数值最近邻或字符串精确匹配）或 `indices` 做 O(1) 单点查表，或按事件类型、持续天数、等级与 `YYYY` / `YYYY-MM` / `YYYY-MM-DD` 日期分块筛选，支持 Top-K 排序（最多返回 500 条）和 `limit=0` 仅计数。 |
+| `query_events` | 通过 CSR 索引按 `coords` 或 `indices` 做 O(1) 单点查表，或按事件类型、持续天数、等级与 `YYYY` / `YYYY-MM` / `YYYY-MM-DD` 日期分块筛选，支持 Top-K 排序（最多返回 500 条）和 `limit=0` 仅计数。 |
 | `summarize_result` | 分块统计像元覆盖率、按事件类型/等级/起始年份分布、持续时间范围与最大绝对强度，不把整张事件表载入内存。 |
 
 `detect_extremes` 会把格点结果写入 `out`，只向模型返回紧凑元数据与样本行，不把原始大数组塞进对话上下文。多年代高分辨率全球数据（如 0.25° OISST 或 OSTIA）耗时较长，建议通过 Skill 运行 Python 脚本，避免触发客户端 MCP 超时。

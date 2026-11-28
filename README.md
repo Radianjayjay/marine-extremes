@@ -103,9 +103,9 @@ python examples/quickstart.py
 
 ## Use with AI agents (Skill and MCP)
 
-### Agent Skill and copy-paste prompts (recommended for coding agents)
+### Agent Skill (recommended for coding agents)
 
-If your coding agent can run local Python (Claude Code, Codex, Cursor, Antigravity, Windsurf, OpenCode), install `marine-extremes[io]` and copy [skills/marine-extremes/SKILL.md](https://github.com/Radianjayjay/marine-extremes/blob/main/skills/marine-extremes/SKILL.md) into its skills directory. When key parameters are not specified up front, the skill inspects the dataset first and prompts via interactive choice cards (or numbered chat options) to fill in `mx.detect(...)` settings such as climatology baseline (30-year fixed, 30/31-year centered moving, 11-year centered moving, or detrended), `compat`, physical bounds, precision, and output format, alongside ocean-data safeguards (explicit `var` on multi-variable files, Kelvin vs. Celsius `lower_bound` checks, singleton dimensions, and disk-backed streaming):
+For coding agents that can run local Python (Claude Code, Codex, Cursor, Antigravity, Windsurf, OpenCode), install `marine-extremes[io]` and put [skills/marine-extremes/SKILL.md](https://github.com/Radianjayjay/marine-extremes/blob/main/skills/marine-extremes/SKILL.md) into your agent's skills directory:
 
 ```bash
 # From a local clone (keep whichever path matches your agent)
@@ -118,27 +118,25 @@ curl -fsSL https://raw.githubusercontent.com/Radianjayjay/marine-extremes/main/s
   -o ~/.claude/skills/marine-extremes/SKILL.md
 ```
 
-If you prefer not to install the skill file, paste this prompt into your coding agent:
+Once installed, talk to your agent in plain language without memorizing parameter names:
 
-```text
-Use the Python package `marine-extremes` (`import marine_extremes as mx`) to detect MHWs/MCSs on <YOUR_DATA_PATH>.
-Inspect dims/units first (pass `var="sst", squeeze_singleton="zlev"` for OISST; convert Kelvin to degC before `lower_bound=-1.8` on OSTIA/ERA5).
-Write results to `out="<OUT>.nc"` with `working_dtype="auto", intensity_dtype="float32", memory_limit="4GB"`, and use `res.events.sel(...)` / `count_map()` for queries.
-```
+> "Use `marine-extremes` to detect MHWs and MCSs from my SST file (or yearly NetCDF folder) at `data/sst_*.nc`, and save the output as `.nc` (or `.zarr` / `.mat` / `.npz`) under `outputs/`."
 
-With either the Skill or the MCP server set up, you can ask directly:
+You do not need to write out `var`, `squeeze_singleton`, `lower_bound`, or `memory_limit` in the prompt. The skill inspects your data first (variables, units, singleton dimensions, and time span), then pops up choice cards (or numbered chat options if the client has no card UI) to confirm your climatology baseline (30-year fixed, 30/31-year centered moving, 11-year centered moving, or detrended), `compat` preset, freezing-point handling, precision, and output format before running `mx.detect(...)`. If you already give every detail up front, or tell the agent to use defaults, it skips the questions and runs right away.
 
-> "Inspect `sst.day.mean.*.nc`, run dual MHW+MCS detection on the 1982-2011 baseline and save results to `outputs/oisst.nc`, and list the top 5 longest events near (-42.5, 148.0)."
+If you have not installed the skill file yet, you can still send a short plain-language request and point the agent to the package:
+
+> "Use the Python package `marine-extremes` (`import marine_extremes as mx`) to detect MHWs and MCSs on `data/sst_*.nc` and save the result to `outputs/`. Inspect the file's variables, units, and time range first, then ask me which baseline, compatibility preset, and output format to use before running."
 
 ### Optional stdio MCP server (for desktop/chat AI clients)
 
-Install the optional MCP extra (compatible with MCP Python SDK v1 and v2):
+If your AI client cannot run local Python scripts directly (for example Claude Desktop or Cherry Studio), install the optional MCP extra (compatible with MCP Python SDK v1 and v2):
 
 ```bash
 pip install "marine-extremes[io,mcp]"
 ```
 
-Register the local stdio server in your MCP client config (for example Claude Desktop or Cherry Studio):
+Add the local stdio server to your MCP client config:
 
 ```json
 {
@@ -165,9 +163,9 @@ If a desktop client does not inherit your Conda/virtualenv `PATH`, point directl
 
 | MCP tool | Purpose |
 | --- | --- |
-| `inspect_dataset` | Inspect variables, dimensions, 1D coordinate ranges (flagging multidimensional curvilinear coords), CF time calendar, singleton dimensions, and Kelvin vs. Celsius notes before running detection. |
+| `inspect_dataset` | Inspect variables, dimensions, 1D coordinate ranges (flagging curvilinear coords), CF time calendar, singleton dimensions, and Kelvin vs. Celsius notes before running detection. |
 | `detect_extremes` | Stream detection across fixed, detrended, moving, or fixed-threshold baselines (with optional 1D `region` slicing) to one `out` file. Returns compact metadata, warnings, and up to 50 sample rows, and refuses to overwrite input files or non-Zarr directories. |
-| `query_events` | Look up one grid cell in O(1) via CSR `coords` (nearest numeric or exact string) or `indices`, or run chunked filters (event type, duration, category, `YYYY` / `YYYY-MM` / `YYYY-MM-DD` dates) with top-k sorting (up to 500 rows) or `limit=0` counts. |
+| `query_events` | Look up one grid cell in O(1) via CSR `coords` or `indices`, or run chunked filters (event type, duration, category, `YYYY` / `YYYY-MM` / `YYYY-MM-DD` dates) with top-k sorting (up to 500 rows) or `limit=0` counts. |
 | `summarize_result` | Aggregate pixel coverage, event counts by type, category, and start year, duration stats, and peak absolute intensity in chunks without loading the full catalog into memory. |
 
 `detect_extremes` writes gridded output to `out` and returns only compact metadata and sample rows, so large arrays stay out of model context. For multi-decade global high-resolution runs (such as 0.25° OISST or OSTIA), run a Python script through the Skill so long detections do not hit MCP client timeouts.
