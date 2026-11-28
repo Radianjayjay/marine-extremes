@@ -28,7 +28,7 @@ jobs:
           python -m pip install --upgrade pip maturin
           maturin build --release --out dist
           WHEEL=$(ls dist/marine_extremes-*.whl)
-          python -m pip install "${WHEEL}[io,dev]"
+          python -m pip install "${WHEEL}[io,mcp,dev]"
       - name: Run Python test suite
         run: pytest -v
       - name: Run quickstart smoke test

@@ -25,6 +25,7 @@
 - 显式跨工具兼容预设。通过 `compat="standard"`、`"m_mhw"`、`"m_mhw_python"`、`"oliver"` 或 `"heatwaveR"` 指定分位数插值、阈值不等号、2 月 29 日插值与方差自由度 `ddof`，与主流工具逐项对齐。
 - 边缘与海冰区保护。支持仅用于检测阶段的 `max_pad_length` 短缺测插值、`min_valid_fraction` 海冰边缘过滤（循环平滑阶段不产生 NaN 渗透）、`truncated_start`/`truncated_end` 截断标记，以及 `lower_bound`（`flag`/`mask`/`floor` 及除零保护）。
 - CF 元数据自动识别。内置轻量 CF 解析器（支持可选 `cf-xarray` 增强），自动推断非 `time` 时间维（如 `valid_time`、`time_counter`、`ocean_time`），过滤 `*_bnds`/`grid_mapping`/`ancillary_variables` 等辅助变量，支持按 `standard_name` 或海洋变量别名选参，并在开尔文/摄氏度与 `lower_bound` 冲突时发出提醒。
+- AI Agent Skill 与 MCP 服务。内置通用 Agent Skill（[skills/marine-extremes/SKILL.md](skills/marine-extremes/SKILL.md)）与可选本地 stdio MCP 服务（`marine-extremes-mcp`，提供 4 个工具），方便在编程 Agent 与 MCP 客户端中通过自然语言调用。
 
 ## 安装
 
@@ -48,13 +49,15 @@ pip install "marine-extremes[io]"
 - `marine-extremes[io]`：上述数据后端全集（`netcdf`、`mat`、`zarr`、`cf`）
 - `marine-extremes[dev]`：`pytest`、`maturin`
 
+> **说明：** 当前 PyPI 预编译版本为 `0.1.0`。CF 元数据解析（`[cf]`）、Agent Skill 与 MCP 服务（`[mcp]`、`marine-extremes-mcp`）目前位于 GitHub `main` 分支（可通过下方源码编译，或执行 `pip install "marine-extremes[io,mcp] @ git+https://github.com/Radianjayjay/marine-extremes.git"` 安装），将在下一版 PyPI 中同步发布。
+
 从源码编译安装（需本机 Rust 工具链）：
 
 ```bash
 git clone https://github.com/Radianjayjay/marine-extremes.git
 cd marine-extremes
 pip install maturin
-maturin develop --release --extras io
+maturin develop --release --extras io,mcp   # 如不需要 MCP 服务可省略 ,mcp
 ```
 
 ## 快速上手
@@ -102,9 +105,18 @@ python examples/quickstart.py
 
 ## 结合 AI Agent 使用（Skill 与 MCP）
 
-### 可直接复制给 AI 的提示词（Coding Agent）
+### Agent Skill 与可直接复制的提示词（推荐用于编程 Agent）
 
-对于可运行本地 Python 的编程 Agent（Claude Code、Codex、Cursor、Antigravity、Windsurf、OpenCode 等），安装 `"marine-extremes[io]"` 并把 [skills/marine-extremes/SKILL.md](skills/marine-extremes/SKILL.md) 放入你的 skills 目录，或直接复制以下提示词发送给 AI：
+对于可运行本地 Python 的编程 Agent（Claude Code、Codex、Cursor、Antigravity、Windsurf、OpenCode 等），安装 `marine-extremes[io]`（使用最新 CF 识别建议从 `main` 安装）并将通用 Skill 文件 [skills/marine-extremes/SKILL.md](skills/marine-extremes/SKILL.md) 放入你的 skills 目录：
+
+```bash
+# 示例：安装到 Claude Code / Codex 用户级 skills 目录（按实际工具保留对应目录）
+mkdir -p ~/.claude/skills/marine-extremes ~/.codex/skills/marine-extremes
+cp skills/marine-extremes/SKILL.md ~/.claude/skills/marine-extremes/SKILL.md
+cp skills/marine-extremes/SKILL.md ~/.codex/skills/marine-extremes/SKILL.md
+```
+
+如果不安装 Skill 文件，也可以直接复制以下独立提示词发送给 AI：
 
 ```text
 请使用 Python 库 `marine-extremes`（`import marine_extremes as mx`）对 <数据路径> 识别海洋热浪（MHW）与海洋冷事件（MCS）。
@@ -112,13 +124,12 @@ python examples/quickstart.py
 大网格务必指定 `out="<输出>.nc"`、`working_dtype="auto"`、`intensity_dtype="float32"`、`memory_limit="4GB"`，单点查表用 `res.events.sel(...)` / `count_map()`。
 ```
 
-### 可选 MCP 服务（供桌面端/对话式 AI 客户端自然语言调用）
+启用 Skill（或下方 MCP 服务）后，即可直接用自然语言发起分析，例如：
+- `“帮我先检查 sst.day.mean.*.nc 的变量和单位，再用 1982-2011 基准做 MHW+MCS 双事件检测并保存到 outputs/oisst.nc，最后列出 (-42.5, 148.0) 附近持续时间最长的前 5 个事件。”`
 
-```bash
-pip install "marine-extremes[io,mcp]"
-```
+### 可选本地 stdio MCP 服务（供桌面端/对话式 AI 客户端使用）
 
-在支持 MCP 的客户端（如 Claude Desktop、Cherry Studio 等）中填入以下配置：
+安装 `[mcp]` 扩展（目前通过 `main` 分支源码 `maturin develop --release --extras io,mcp` 安装；下一版 PyPI 发布后可直接 `pip install "marine-extremes[io,mcp]"`），然后在支持 MCP 的客户端（如 Claude Desktop、Cherry Studio 等）中填入以下配置：
 
 ```json
 {
@@ -130,7 +141,27 @@ pip install "marine-extremes[io,mcp]"
 }
 ```
 
-提供 4 个工具：`inspect_dataset`（探测变量/时间维/单位）、`detect_extremes`（流式落盘到 `out`，只返回紧凑摘要与样本行）、`query_events`（CSR O(1) 单点查表或条件筛选）、`summarize_result`（统计事件总数、空间分布、年份与分级汇总）。注意：全球高分辨率长序列（如 0.25° 全球 OISST/OSTIA）耗时较长，建议优先用 Skill 让 Agent 后台跑脚本，避免触发客户端 MCP 工具超时。
+如果桌面端客户端未继承你的 Conda/虚拟环境 `PATH`，可直接指向该环境中的 Python 解释器：
+
+```json
+{
+  "mcpServers": {
+    "marine-extremes": {
+      "command": "/path/to/your/env/bin/python",
+      "args": ["-m", "marine_extremes.mcp_server"]
+    }
+  }
+}
+```
+
+| MCP 工具 | 用途 |
+| --- | --- |
+| `inspect_dataset` | 在检测前探测变量名、维度坐标、CF 时间日历、单长度维及开尔文/摄氏度提醒。 |
+| `detect_extremes` | 支持固定/去趋势/滑动/物理阈值基线的流式检测，写入单文件 `out` 并返回紧凑摘要与样本行。 |
+| `query_events` | 基于 CSR 索引执行 O(1) `coords`/`indices` 单点查表，或分块条件筛选与 Top-K 排序（不整表加载）。 |
+| `summarize_result` | 汇总像元覆盖率、按事件类型/等级/年份分布、持续时间统计及最大绝对强度。 |
+
+注意：全球高分辨率长序列（如 0.25° 全球 OISST/OSTIA）耗时较长，建议优先用 Skill 让 Agent 在后台运行 Python 脚本，避免触发客户端 MCP 工具调用超时。
 
 ## 性能与精度验证
 
@@ -238,8 +269,8 @@ marine-extremes/
 # 运行 Rust 单元测试
 cargo test --lib
 
-# 构建 Release 扩展并安装可选 I/O 与开发依赖
-maturin develop --release --extras io,dev
+# 构建 Release 扩展并安装可选 I/O、MCP 与开发依赖
+maturin develop --release --extras io,mcp,dev
 
 # 运行完整 Python 测试套件（若本机已安装 MATLAB 则自动包含 R2025b 核对）
 pytest -v
@@ -262,7 +293,7 @@ python benchmarks/bench_global_scale.py
 2. 提交 Pull Request 前在本地跑通 Rust 与 Python 测试：
    ```bash
    cargo test --lib
-   maturin develop --release --extras io,dev
+   maturin develop --release --extras io,mcp,dev
    pytest -v
    ```
 3. 涉及行为变更或缺陷修复时，在 `tests/` 中补充单元测试或回归测试。

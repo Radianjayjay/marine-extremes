@@ -234,3 +234,133 @@ def test_real_mcp_server_registration_and_missing_dep_error(tmp_path: Path, monk
         mp.setitem(sys.modules, "mcp.server.fastmcp", None)
         with pytest.raises(ImportError, match="marine-extremes\\[mcp\\]"):
             mcp_server.create_mcp_server()
+
+
+def test_mcp_stdio_subprocess_end_to_end(tmp_path: Path):
+    pytest.importorskip("mcp")
+    from mcp import ClientSession
+    from mcp.client.stdio import StdioServerParameters, stdio_client
+
+    paths = _write_sample_datasets(tmp_path)
+    out_nc = tmp_path / "stdio_oisst.nc"
+    out_era = tmp_path / "stdio_era5.parquet"
+
+    def _is_error(res: object) -> bool:
+        return bool(getattr(res, "is_error", getattr(res, "isError", False)))
+
+    def _json_payload(res: object) -> dict[str, object]:
+        return json.loads(res.content[0].text)
+
+    cli_name = "marine-extremes-mcp.exe" if sys.platform == "win32" else "marine-extremes-mcp"
+    cli_path = Path(sys.executable).parent / cli_name
+    if cli_path.is_file():
+        primary_params = StdioServerParameters(command=str(cli_path), args=[])
+        has_cli = True
+    else:
+        primary_params = StdioServerParameters(command=sys.executable, args=["-m", "marine_extremes.mcp_server"])
+        has_cli = False
+
+    async def _run_primary() -> None:
+        async with stdio_client(primary_params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                tools_res = await session.list_tools()
+                assert {t.name for t in tools_res.tools} == {
+                    "inspect_dataset",
+                    "detect_extremes",
+                    "query_events",
+                    "summarize_result",
+                }
+
+                r_ins = await session.call_tool("inspect_dataset", {"path": str(paths["oisst"])})
+                assert not _is_error(r_ins)
+                p_ins = _json_payload(r_ins)
+                assert p_ins["singleton_dims"] == ["zlev"]
+                assert p_ins["recommended_var"] is None
+
+                r_det = await session.call_tool(
+                    "detect_extremes",
+                    {
+                        "path": str(paths["oisst"]),
+                        "out": str(out_nc),
+                        "var": "sst",
+                        "squeeze_singleton": "zlev",
+                        "event": "both",
+                        "region": {"lat": [-30.0, -29.0], "lon": [150.0, 151.0]},
+                        "sample_limit": 2,
+                    },
+                )
+                assert not _is_error(r_det)
+                p_det = _json_payload(r_det)
+                assert out_nc.is_file()
+                assert p_det["n_events"] > 5
+                assert len(p_det["sample_events"]) == 2
+
+                r_q = await session.call_tool(
+                    "query_events",
+                    {
+                        "result_path": str(out_nc),
+                        "coords": {"lat": -30.0, "lon": 150.0},
+                        "event_type": "mhw",
+                    },
+                )
+                assert not _is_error(r_q)
+                p_q = _json_payload(r_q)
+                assert p_q["total_matched"] >= 1
+
+                r_sum = await session.call_tool("summarize_result", {"result_path": str(out_nc)})
+                assert not _is_error(r_sum)
+                p_sum = _json_payload(r_sum)
+                assert p_sum["n_events"] == p_det["n_events"]
+
+                # Ensure UserWarning from Kelvin lower_bound is captured cleanly without corrupting stdio JSON-RPC
+                r_era = await session.call_tool(
+                    "detect_extremes",
+                    {
+                        "path": str(paths["era5"]),
+                        "out": str(out_era),
+                        "lower_bound": -1.8,
+                        "sample_limit": 0,
+                    },
+                )
+                assert not _is_error(r_era)
+                p_era = _json_payload(r_era)
+                assert out_era.is_file()
+                assert any("Kelvin" in w for w in p_era["warnings"])
+
+                # Ensure ToolError preserves diagnostic message over real MCP stdio
+                r_err = await session.call_tool(
+                    "inspect_dataset",
+                    {"path": str(tmp_path / "does_not_exist.nc")},
+                )
+                assert _is_error(r_err)
+                assert "does not exist" in r_err.content[0].text
+
+    async def _run_module_handshake() -> None:
+        params = StdioServerParameters(command=sys.executable, args=["-m", "marine_extremes.mcp_server"])
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(read, write) as session:
+                await session.initialize()
+                tools_res = await session.list_tools()
+                assert {t.name for t in tools_res.tools} == {
+                    "inspect_dataset",
+                    "detect_extremes",
+                    "query_events",
+                    "summarize_result",
+                }
+
+    asyncio.run(_run_primary())
+    if has_cli:
+        asyncio.run(_run_module_handshake())
+
+
+def test_skill_markdown_frontmatter():
+    skill_path = Path(__file__).resolve().parents[1] / "skills" / "marine-extremes" / "SKILL.md"
+    assert skill_path.is_file()
+    text = skill_path.read_text(encoding="utf-8")
+    assert text.startswith("---\n")
+    parts = text.split("\n---\n", 1)
+    assert len(parts) == 2
+    frontmatter = parts[0]
+    assert "name: marine-extremes" in frontmatter
+    assert "description:" in frontmatter

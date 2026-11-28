@@ -25,6 +25,7 @@ An interactive architecture walkthrough is available in [docs/marine_extremes_ov
 - Explicit cross-tool compatibility profiles. Choose `compat="standard"`, `"m_mhw"`, `"m_mhw_python"`, `"oliver"`, or `"heatwaveR"` to match the quantile rule, threshold inequality, Feb 29 handling, and variance `ddof` of a specific reference tool.
 - Edge and sea-ice safeguards. Includes detection-only `max_pad_length`, `min_valid_fraction` filtering (without NaN bleed during circular smoothing), `truncated_start`/`truncated_end` flags, and `lower_bound` handling (`flag`, `mask`, or `floor` with zero-division protection).
 - CF-aware input resolution. Built-in lightweight CF metadata resolver (with optional `cf-xarray` enhancement) infers non-`time` time dimensions (`valid_time`, `time_counter`, `ocean_time`), filters `*_bnds`/`grid_mapping`/`ancillary_variables`, resolves CF `standard_name` and marine aliases, and warns on Kelvin vs. Celsius `lower_bound` mismatches.
+- AI Agent Skill & MCP server. Includes a universal Agent Skill ([skills/marine-extremes/SKILL.md](https://github.com/Radianjayjay/marine-extremes/blob/main/skills/marine-extremes/SKILL.md)) and an optional local stdio MCP server (`marine-extremes-mcp`, 4 tools) for natural-language workflows in coding agents and MCP clients.
 
 ## Installation
 
@@ -48,13 +49,15 @@ Optional dependency groups in [pyproject.toml](https://github.com/Radianjayjay/m
 - `marine-extremes[io]`: all of the above (`netcdf`, `mat`, `zarr`, `cf`)
 - `marine-extremes[dev]`: `pytest`, `maturin`
 
+> **Note:** Prebuilt PyPI wheels currently host `0.1.0`. The CF metadata resolver (`[cf]`), Agent Skill, and MCP server (`[mcp]`, `marine-extremes-mcp`) are on `main` (install from source below, or via `pip install "marine-extremes[io,mcp] @ git+https://github.com/Radianjayjay/marine-extremes.git"`) until the next PyPI release.
+
 To build from source instead (requires a Rust toolchain):
 
 ```bash
 git clone https://github.com/Radianjayjay/marine-extremes.git
 cd marine-extremes
 pip install maturin
-maturin develop --release --extras io
+maturin develop --release --extras io,mcp   # omit ,mcp if you do not need the MCP server
 ```
 
 ## Quick start
@@ -102,9 +105,18 @@ python examples/quickstart.py
 
 ## Use with AI Agents (Skill & MCP)
 
-### Copy-paste prompt for coding agents
+### Agent Skill & copy-paste prompts (recommended for coding agents)
 
-For agents that can run local Python (Claude Code, Codex, Cursor, Antigravity, Windsurf, OpenCode), install `"marine-extremes[io]"` and copy [skills/marine-extremes/SKILL.md](https://github.com/Radianjayjay/marine-extremes/blob/main/skills/marine-extremes/SKILL.md) into your skills folder, or paste:
+For agents that can run local Python (Claude Code, Codex, Cursor, Antigravity, Windsurf, OpenCode), install `marine-extremes[io]` (from `main` for the latest CF support) and install the universal skill file [skills/marine-extremes/SKILL.md](https://github.com/Radianjayjay/marine-extremes/blob/main/skills/marine-extremes/SKILL.md):
+
+```bash
+# Example: install for Claude Code or Codex user skills (keep whichever path matches your tool)
+mkdir -p ~/.claude/skills/marine-extremes ~/.codex/skills/marine-extremes
+cp skills/marine-extremes/SKILL.md ~/.claude/skills/marine-extremes/SKILL.md
+cp skills/marine-extremes/SKILL.md ~/.codex/skills/marine-extremes/SKILL.md
+```
+
+Or copy this standalone prompt directly into any coding agent without installing the skill file first:
 
 ```text
 Use the Python package `marine-extremes` (`import marine_extremes as mx`) to detect MHWs/MCSs on <YOUR_DATA_PATH>.
@@ -112,13 +124,12 @@ Inspect dims/units first (pass `var="sst", squeeze_singleton="zlev"` for OISST; 
 Write results to `out="<OUT>.nc"` with `working_dtype="auto", intensity_dtype="float32", memory_limit="4GB"`, and use `res.events.sel(...)` / `count_map()` for queries.
 ```
 
-### Optional MCP server (for desktop/chat AI clients)
+Once the Skill (or MCP server below) is configured, you can ask in plain natural language, for example:
+- `"Inspect sst.day.mean.*.nc, run dual MHW+MCS detection on the 1982-2011 baseline writing outputs/oisst.nc, and list the top 5 longest events near (-42.5, 148.0)."`
 
-```bash
-pip install "marine-extremes[io,mcp]"
-```
+### Optional stdio MCP server (for desktop/chat AI clients)
 
-Register the local stdio server (`marine-extremes-mcp`) in your MCP client config:
+Install the `[mcp]` extra (currently from `main` via `maturin develop --release --extras io,mcp`, or `pip install "marine-extremes[io,mcp]"` once the next PyPI release is published), then register the local stdio server in your MCP client config:
 
 ```json
 {
@@ -130,7 +141,27 @@ Register the local stdio server (`marine-extremes-mcp`) in your MCP client confi
 }
 ```
 
-Exposed tools: `inspect_dataset`, `detect_extremes` (streams to single-file `out` and returns compact metadata + sample rows), `query_events` (CSR O(1) single-cell lookup or bounded filtering), and `summarize_result`. For multi-decade global high-resolution runs (e.g. 0.25° OISST/OSTIA), prefer running a Python script via the Skill so long detections do not hit client MCP call timeouts.
+If a desktop client does not inherit your Conda/virtualenv `PATH`, point directly to that environment's Python interpreter instead:
+
+```json
+{
+  "mcpServers": {
+    "marine-extremes": {
+      "command": "/path/to/your/env/bin/python",
+      "args": ["-m", "marine_extremes.mcp_server"]
+    }
+  }
+}
+```
+
+| MCP tool | Purpose |
+| --- | --- |
+| `inspect_dataset` | Inspect variables, dims/coords, CF time calendar, singleton dims, and Kelvin/Celsius notes before running detection. |
+| `detect_extremes` | Stream detection across fixed/detrended/moving/threshold baselines to a single `out` file and return compact summary + sample rows. |
+| `query_events` | Perform O(1) CSR grid lookup by `coords`/`indices` or chunked filtering and top-k sorting without loading full catalogs. |
+| `summarize_result` | Aggregate pixel coverage, event counts by type/category/start year, duration range, and peak absolute intensity. |
+
+For multi-decade global high-resolution runs (e.g. 0.25° OISST/OSTIA), prefer running a Python script via the Skill so long detections do not hit client MCP call timeouts.
 
 ## Benchmarks and verification
 
@@ -239,7 +270,7 @@ marine-extremes/
 cargo test --lib
 
 # Build release extension and install optional dependencies
-maturin develop --release --extras io,dev
+maturin develop --release --extras io,mcp,dev
 
 # Full Python test suite (includes MATLAB R2025b checks when installed)
 pytest -v
@@ -262,7 +293,7 @@ Bug fixes, calendar or I/O adapters, parity tests, and documentation edits are w
 2. Run both the Rust and Python tests locally before opening a pull request:
    ```bash
    cargo test --lib
-   maturin develop --release --extras io,dev
+   maturin develop --release --extras io,mcp,dev
    pytest -v
    ```
 3. Add unit or regression tests under `tests/` for behavioral changes or bug fixes.

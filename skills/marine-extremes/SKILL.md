@@ -20,6 +20,8 @@ pip install "marine-extremes[io]"        # full NetCDF4, HDF5/MAT, Zarr, cftime,
 # Optional extras: "marine-extremes[cf]" (cf-xarray), "marine-extremes[mcp]" (MCP server)
 ```
 
+> Note: Until `v0.2.0` is published on PyPI, `[cf]`, `[mcp]`, and `marine-extremes-mcp` live on `main` (install from source via `maturin develop --release --extras io,mcp` or `pip install "marine-extremes[io,mcp] @ git+https://github.com/Radianjayjay/marine-extremes.git"`).
+
 ## Core Workflow
 
 ```python

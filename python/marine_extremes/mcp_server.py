@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import functools
 import glob as glob_mod
 import math
 import warnings
@@ -487,15 +488,24 @@ def summarize_result(result_path: str) -> dict[str, Any]:
 def create_mcp_server() -> Any:
     """Create and register the ``marine-extremes`` MCP server (supports MCP SDK v2 and v1)."""
     server_cls: Any = None
+    tool_error_cls: type[Exception] | None = None
     try:
         from mcp.server.mcpserver import MCPServer
+        from mcp.server.mcpserver.exceptions import ToolError
 
         server_cls = MCPServer
+        tool_error_cls = ToolError
     except ImportError:
         try:
             from mcp.server.fastmcp import FastMCP
 
             server_cls = FastMCP
+            try:
+                from mcp.server.fastmcp.exceptions import ToolError as FastToolError
+
+                tool_error_cls = FastToolError
+            except ImportError:
+                tool_error_cls = None
         except ImportError as exc:
             raise ImportError(
                 "The optional `mcp` package is required for marine-extremes-mcp. "
@@ -510,7 +520,23 @@ def create_mcp_server() -> Any:
         ),
     )
     for fn in (inspect_dataset, detect_extremes, query_events, summarize_result):
-        server.tool()(fn)
+        if tool_error_cls is not None:
+
+            @functools.wraps(fn)
+            def _wrapped(
+                *args: Any,
+                _fn: Any = fn,
+                _err_cls: type[Exception] = tool_error_cls,
+                **kwargs: Any,
+            ) -> Any:
+                try:
+                    return _fn(*args, **kwargs)
+                except (FileNotFoundError, ValueError, KeyError, OSError, ImportError, NotImplementedError) as exc:
+                    raise _err_cls(str(exc)) from exc
+
+            server.tool()(_wrapped)
+        else:
+            server.tool()(fn)
     return server
 
 
