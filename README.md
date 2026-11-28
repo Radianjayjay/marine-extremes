@@ -44,7 +44,8 @@ Optional dependency groups in [pyproject.toml](https://github.com/Radianjayjay/m
 - `marine-extremes[mat]`: `h5py`, `scipy` (MATLAB v7.3 and v5 `.mat`)
 - `marine-extremes[zarr]`: `zarr>=3.0`, `cftime`, `dask`
 - `marine-extremes[cf]`: `cf-xarray` (optional CF accessor & custom criteria enhancement)
-- `marine-extremes[io]`: all of the above
+- `marine-extremes[mcp]`: `mcp` (optional stdio MCP server `marine-extremes-mcp` for AI clients)
+- `marine-extremes[io]`: all of the above (`netcdf`, `mat`, `zarr`, `cf`)
 - `marine-extremes[dev]`: `pytest`, `maturin`
 
 To build from source instead (requires a Rust toolchain):
@@ -98,6 +99,38 @@ To run the standalone demo without external data:
 ```bash
 python examples/quickstart.py
 ```
+
+## Use with AI Agents (Skill & MCP)
+
+### Copy-paste prompt for coding agents
+
+For agents that can run local Python (Claude Code, Codex, Cursor, Antigravity, Windsurf, OpenCode), install `"marine-extremes[io]"` and copy [skills/marine-extremes/SKILL.md](https://github.com/Radianjayjay/marine-extremes/blob/main/skills/marine-extremes/SKILL.md) into your skills folder, or paste:
+
+```text
+Use the Python package `marine-extremes` (`import marine_extremes as mx`) to detect MHWs/MCSs on <YOUR_DATA_PATH>.
+Inspect dims/units first (pass `var="sst", squeeze_singleton="zlev"` for OISST; convert Kelvin to degC before `lower_bound=-1.8` on OSTIA/ERA5).
+Write results to `out="<OUT>.nc"` with `working_dtype="auto", intensity_dtype="float32", memory_limit="4GB"`, and use `res.events.sel(...)` / `count_map()` for queries.
+```
+
+### Optional MCP server (for desktop/chat AI clients)
+
+```bash
+pip install "marine-extremes[io,mcp]"
+```
+
+Register the local stdio server (`marine-extremes-mcp`) in your MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "marine-extremes": {
+      "command": "marine-extremes-mcp"
+    }
+  }
+}
+```
+
+Exposed tools: `inspect_dataset`, `detect_extremes` (streams to single-file `out` and returns compact metadata + sample rows), `query_events` (CSR O(1) single-cell lookup or bounded filtering), and `summarize_result`. For multi-decade global high-resolution runs (e.g. 0.25° OISST/OSTIA), prefer running a Python script via the Skill so long detections do not hit client MCP call timeouts.
 
 ## Benchmarks and verification
 
@@ -182,8 +215,10 @@ marine-extremes/
 │   ├── cf.py                         # Built-in lightweight CF resolver & optional cf-xarray enhancement
 │   ├── compat.py                     # Cross-tool compatibility presets
 │   ├── io_formats.py                 # OutputSpec, ResultSink seam & 8 single-file format adapters
+│   ├── mcp_server.py                 # Optional stdio MCP server (4 tools for AI clients)
 │   ├── result.py                     # DetectResult container (save, to_mat, open, to_dataset)
 │   └── streaming.py                  # Multi-file glob reader, singleton squeeze & memory tiling
+├── skills/marine-extremes/SKILL.md   # Agent Skill guide for Claude Code / Codex / Cursor / etc.
 ├── tests/                            # Unit, parity, adversarial, streaming & MATLAB R2025b tests
 ├── examples/quickstart.py            # Standalone runnable quickstart
 ├── benchmarks/bench_global_scale.py  # Synthetic global-scale throughput benchmark

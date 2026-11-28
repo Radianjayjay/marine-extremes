@@ -44,7 +44,8 @@ pip install "marine-extremes[io]"
 - `marine-extremes[mat]`：`h5py`、`scipy`（MATLAB v7.3 与 v5 `.mat`）
 - `marine-extremes[zarr]`：`zarr>=3.0`、`cftime`、`dask`
 - `marine-extremes[cf]`：`cf-xarray`（可选 CF accessor 与自定义准则增强）
-- `marine-extremes[io]`：以上全部格式支持
+- `marine-extremes[mcp]`：`mcp`（可选本地 stdio MCP 服务 `marine-extremes-mcp`，供 AI 客户端调用）
+- `marine-extremes[io]`：上述数据后端全集（`netcdf`、`mat`、`zarr`、`cf`）
 - `marine-extremes[dev]`：`pytest`、`maturin`
 
 从源码编译安装（需本机 Rust 工具链）：
@@ -98,6 +99,38 @@ res.save("outputs/oisst_mhw.zarr")
 ```bash
 python examples/quickstart.py
 ```
+
+## 结合 AI Agent 使用（Skill 与 MCP）
+
+### 可直接复制给 AI 的提示词（Coding Agent）
+
+对于可运行本地 Python 的编程 Agent（Claude Code、Codex、Cursor、Antigravity、Windsurf、OpenCode 等），安装 `"marine-extremes[io]"` 并把 [skills/marine-extremes/SKILL.md](skills/marine-extremes/SKILL.md) 放入你的 skills 目录，或直接复制以下提示词发送给 AI：
+
+```text
+请使用 Python 库 `marine-extremes`（`import marine_extremes as mx`）对 <数据路径> 识别海洋热浪（MHW）与海洋冷事件（MCS）。
+先检查变量与单位（OISST 传 `var="sst", squeeze_singleton="zlev"`；OSTIA/ERA5 开尔文数据先转摄氏度再用 `lower_bound=-1.8`）。
+大网格务必指定 `out="<输出>.nc"`、`working_dtype="auto"`、`intensity_dtype="float32"`、`memory_limit="4GB"`，单点查表用 `res.events.sel(...)` / `count_map()`。
+```
+
+### 可选 MCP 服务（供桌面端/对话式 AI 客户端自然语言调用）
+
+```bash
+pip install "marine-extremes[io,mcp]"
+```
+
+在支持 MCP 的客户端（如 Claude Desktop、Cherry Studio 等）中填入以下配置：
+
+```json
+{
+  "mcpServers": {
+    "marine-extremes": {
+      "command": "marine-extremes-mcp"
+    }
+  }
+}
+```
+
+提供 4 个工具：`inspect_dataset`（探测变量/时间维/单位）、`detect_extremes`（流式落盘到 `out`，只返回紧凑摘要与样本行）、`query_events`（CSR O(1) 单点查表或条件筛选）、`summarize_result`（统计事件总数、空间分布、年份与分级汇总）。注意：全球高分辨率长序列（如 0.25° 全球 OISST/OSTIA）耗时较长，建议优先用 Skill 让 Agent 后台跑脚本，避免触发客户端 MCP 工具超时。
 
 ## 性能与精度验证
 
@@ -182,8 +215,10 @@ marine-extremes/
 │   ├── cf.py                         # 内置轻量 CF 解析与可选 cf-xarray 增强
 │   ├── compat.py                     # 跨工具数值兼容预设
 │   ├── io_formats.py                 # OutputSpec、ResultSink 抽象与 8 套单文件格式适配器
+│   ├── mcp_server.py                 # 可选本地 stdio MCP 服务（4 个 AI 工具接口）
 │   ├── result.py                     # DetectResult 结果容器（save、to_mat、open、to_dataset）
 │   └── streaming.py                  # 多文件通配符懒加载、单维压缩与内存分块
+├── skills/marine-extremes/SKILL.md   # 通用 Agent Skill（Claude Code / Codex / Cursor 等）
 ├── tests/                            # 单元测试、精度对标、边界压测、流式 I/O 与 MATLAB R2025b 验证
 ├── examples/quickstart.py            # 无需外部数据的快速入门脚本
 ├── benchmarks/bench_global_scale.py  # 合成全球规模吞吐量基准脚本
