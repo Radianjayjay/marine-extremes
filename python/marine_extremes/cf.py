@@ -303,6 +303,17 @@ def select_dataset_var(ds: xr.Dataset, var: str | None = None, *, time_dim: str 
     raise ValueError(f"Dataset has multiple variables {primary or all_vars}; pass `var=...` explicitly.")
 
 
+def is_kelvin_units(raw_units: Any) -> bool:
+    """Return True if a CF ``units`` attribute represents Kelvin."""
+    if raw_units is None:
+        return False
+    units = _as_str(raw_units).strip()
+    if not units:
+        return False
+    u_norm = "_".join(units.lower().split())
+    return units == "K" or u_norm in _KELVIN_UNITS
+
+
 def warn_if_units_mismatch(da: xr.DataArray, lower_bound: float | None, *, stacklevel: int = 3) -> None:
     """Warn (without modifying values) when temperature ``units`` and ``lower_bound`` conflict."""
     if lower_bound is None or not math.isfinite(lb := float(lower_bound)):
@@ -314,7 +325,7 @@ def warn_if_units_mismatch(da: xr.DataArray, lower_bound: float | None, *, stack
         return
     u_norm = "_".join(units.lower().split())
 
-    if (units == "K" or u_norm in _KELVIN_UNITS) and lb < 100.0:
+    if is_kelvin_units(raw_units) and lb < 100.0:
         warnings.warn(
             f"Input variable '{da.name or 'value'}' has units='{units}' (Kelvin), "
             f"but lower_bound={lower_bound!r} looks like Celsius (< 100). "

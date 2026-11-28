@@ -20,7 +20,7 @@ pip install "marine-extremes[io]"        # full NetCDF4, HDF5/MAT, Zarr, cftime,
 # Optional extras: "marine-extremes[cf]" (cf-xarray), "marine-extremes[mcp]" (MCP server)
 ```
 
-> Note: Until `v0.2.0` is published on PyPI, `[cf]`, `[mcp]`, and `marine-extremes-mcp` live on `main` (install from source via `maturin develop --release --extras io,mcp` or `pip install "marine-extremes[io,mcp] @ git+https://github.com/Radianjayjay/marine-extremes.git"`).
+> Note: Until `v0.2.0` is published on PyPI, `[cf]`, `[mcp]`, and `marine-extremes-mcp` live on `main` (install from source via `maturin develop --release --extras io,mcp` or `pip install "marine-extremes[io,mcp] @ git+https://github.com/Radianjayjay/marine-extremes.git"`; both require a Rust toolchain).
 
 ## Core Workflow
 
@@ -59,7 +59,7 @@ res = mx.detect(
 | Cross-scenario (e.g. historical -> SSP) | `baseline=mx.FixedBaseline("1982-01-01", "2014-12-31", clim_data=hist_nc)` |
 | Detrended baseline (linear / quadratic OLS) | `baseline=mx.DetrendedBaseline("linear")` (coefficients in `res.trend`) |
 | Sliding window baseline | `baseline=mx.MovingBaseline(window_years=31, center=True, boundary="clamp")` |
-| Physical/ecological threshold | `baseline=mx.FixedThreshold(threshold_high=29.0, climatology=clim_da)` |
+| Physical/ecological threshold | `baseline=mx.FixedThreshold(threshold_high=29.0, climatology=27.0)` (scalar or static spatial-only `DataArray`; use `ExternalClimatology` for seasonal clim) |
 | Precomputed climatology | `baseline=mx.ExternalClimatology.from_dataset(clim_ds)` |
 | Monthly Jacox (2020) mode | `freq="monthly"` (defaults: `window_half_width=0, smooth_width=1, min_duration=1, max_gap=0`) |
 | Match reference tool conventions | `compat="standard"` \| `"m_mhw"` \| `"m_mhw_python"` \| `"oliver"` \| `"heatwaveR"` |

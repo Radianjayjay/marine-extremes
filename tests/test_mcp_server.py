@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import datetime as dt
 import json
 import sys
+import types
+import warnings
 from pathlib import Path
 
 import numpy as np
@@ -13,6 +16,17 @@ import pytest
 import xarray as xr
 
 from marine_extremes import mcp_server
+
+
+def _extract_tool_text(call_res: object) -> str:
+    """Extract text payload across MCP SDK v2 CallToolResult and v1 FastMCP return shapes."""
+    content = getattr(call_res, "content", None)
+    if content is None:
+        if isinstance(call_res, tuple) and len(call_res) == 2:
+            content = call_res[0]
+        else:
+            content = call_res
+    return content[0].text
 
 
 def _write_sample_datasets(tmp_path: Path) -> dict[str, Path]:
@@ -221,11 +235,18 @@ def test_real_mcp_server_registration_and_missing_dep_error(tmp_path: Path, monk
 
     srv = mcp_server.create_mcp_server()
     tools = asyncio.run(srv.list_tools())
-    tool_names = {t.name for t in tools}
-    assert tool_names == {"inspect_dataset", "detect_extremes", "query_events", "summarize_result"}
+    tool_map = {t.name: t for t in tools}
+    assert set(tool_map) == {"inspect_dataset", "detect_extremes", "query_events", "summarize_result"}
+
+    det_schema = getattr(tool_map["detect_extremes"], "input_schema", None) or tool_map["detect_extremes"].inputSchema
+    props = det_schema["properties"]
+    assert "enum" in props["baseline_type"]
+    assert "fixed" in props["baseline_type"]["enum"]
+    assert "enum" in props["event"]
+    assert "description" in props["path"] and "description" in props["out"]
 
     call_res = asyncio.run(srv.call_tool("inspect_dataset", {"path": str(paths["cmip"])}))
-    payload = json.loads(call_res.content[0].text)
+    payload = json.loads(_extract_tool_text(call_res))
     assert payload["recommended_var"] == "tos"
 
     # Simulate missing optional mcp package cleanly
@@ -234,6 +255,39 @@ def test_real_mcp_server_registration_and_missing_dep_error(tmp_path: Path, monk
         mp.setitem(sys.modules, "mcp.server.fastmcp", None)
         with pytest.raises(ImportError, match="marine-extremes\\[mcp\\]"):
             mcp_server.create_mcp_server()
+
+
+def test_mcp_v1_fastmcp_fallback_and_tool_error(monkeypatch: pytest.MonkeyPatch):
+    class _FakeToolError(Exception):
+        pass
+
+    class _FakeFastMCP:
+        def __init__(self, name: str, instructions: str = "") -> None:
+            self.name = name
+            self.instructions = instructions
+            self.tools: dict[str, object] = {}
+
+        def tool(self):
+            def _dec(fn):
+                self.tools[fn.__name__] = fn
+                return fn
+
+            return _dec
+
+    fake_fastmcp_mod = types.ModuleType("mcp.server.fastmcp")
+    fake_fastmcp_mod.FastMCP = _FakeFastMCP  # type: ignore[attr-defined]
+    fake_exc_mod = types.ModuleType("mcp.server.fastmcp.exceptions")
+    fake_exc_mod.ToolError = _FakeToolError  # type: ignore[attr-defined]
+
+    with monkeypatch.context() as mp:
+        mp.setitem(sys.modules, "mcp.server.mcpserver", None)
+        mp.setitem(sys.modules, "mcp.server.fastmcp", fake_fastmcp_mod)
+        mp.setitem(sys.modules, "mcp.server.fastmcp.exceptions", fake_exc_mod)
+        srv = mcp_server.create_mcp_server()
+
+    assert set(srv.tools) == {"inspect_dataset", "detect_extremes", "query_events", "summarize_result"}
+    with pytest.raises(_FakeToolError, match="does not exist"):
+        srv.tools["inspect_dataset"](path="/nonexistent_fastmcp_test.nc")
 
 
 def test_mcp_stdio_subprocess_end_to_end(tmp_path: Path):
@@ -249,7 +303,7 @@ def test_mcp_stdio_subprocess_end_to_end(tmp_path: Path):
         return bool(getattr(res, "is_error", getattr(res, "isError", False)))
 
     def _json_payload(res: object) -> dict[str, object]:
-        return json.loads(res.content[0].text)
+        return json.loads(_extract_tool_text(res))
 
     cli_name = "marine-extremes-mcp.exe" if sys.platform == "win32" else "marine-extremes-mcp"
     cli_path = Path(sys.executable).parent / cli_name
@@ -328,13 +382,20 @@ def test_mcp_stdio_subprocess_end_to_end(tmp_path: Path):
                 assert out_era.is_file()
                 assert any("Kelvin" in w for w in p_era["warnings"])
 
-                # Ensure ToolError preserves diagnostic message over real MCP stdio
+                # Ensure ToolError preserves diagnostic messages for FileNotFoundError and IndexError
                 r_err = await session.call_tool(
                     "inspect_dataset",
                     {"path": str(tmp_path / "does_not_exist.nc")},
                 )
                 assert _is_error(r_err)
-                assert "does not exist" in r_err.content[0].text
+                assert "does not exist" in _extract_tool_text(r_err)
+
+                r_oob = await session.call_tool(
+                    "query_events",
+                    {"result_path": str(out_nc), "indices": {"lat": 999, "lon": 0}},
+                )
+                assert _is_error(r_oob)
+                assert "out of bounds" in _extract_tool_text(r_oob)
 
     async def _run_module_handshake() -> None:
         params = StdioServerParameters(command=sys.executable, args=["-m", "marine_extremes.mcp_server"])
@@ -349,9 +410,240 @@ def test_mcp_stdio_subprocess_end_to_end(tmp_path: Path):
                     "summarize_result",
                 }
 
-    asyncio.run(_run_primary())
+    asyncio.run(asyncio.wait_for(_run_primary(), timeout=60))
     if has_cli:
-        asyncio.run(_run_module_handshake())
+        asyncio.run(asyncio.wait_for(_run_module_handshake(), timeout=60))
+
+
+def test_to_jsonable_edge_cases():
+    cftime = pytest.importorskip("cftime")
+    sample = {
+        "nat": pd.NaT,
+        "na": pd.NA,
+        "nan": float("nan"),
+        "inf": float("inf"),
+        "arr0d_num": np.array(3.14),
+        "arr0d_str": np.array("degC"),
+        "arr1d": np.array([1, 2]),
+        "bytes": b"K",
+        "np_bytes": np.bytes_(b"degK"),
+        "cftime": cftime.DatetimeNoLeap(2000, 3, 1),
+        "date": dt.date(2001, 2, 3),
+        "ts_nat": pd.Timestamp("NaT"),
+    }
+    encoded = mcp_server._to_jsonable(sample)
+    assert encoded == {
+        "nat": None,
+        "na": None,
+        "nan": None,
+        "inf": None,
+        "arr0d_num": 3.14,
+        "arr0d_str": "degC",
+        "arr1d": [1, 2],
+        "bytes": "K",
+        "np_bytes": "degK",
+        "cftime": "2000-03-01",
+        "date": "2001-02-03",
+        "ts_nat": None,
+    }
+    assert json.dumps(encoded, allow_nan=False)
+
+
+def test_path_safety_region_and_literal_bracket_filename(tmp_path: Path):
+    paths = _write_sample_datasets(tmp_path)
+
+    # Reject out == input path and out matching a glob input member
+    orig_bytes = paths["cmip"].read_bytes()
+    with pytest.raises(ValueError, match="overlaps input"):
+        mcp_server.detect_extremes(str(paths["cmip"]), out=str(paths["cmip"]))
+    assert paths["cmip"].read_bytes() == orig_bytes
+
+    glob_member = sorted(tmp_path.glob("oisst_part_*.nc"))[0]
+    with pytest.raises(ValueError, match="overlaps input"):
+        mcp_server.detect_extremes(str(paths["glob"]), out=str(glob_member), var="sst")
+
+    # Reject overwriting non-Zarr directories (even with .zarr extension)
+    keep_dir = tmp_path / "keep_dir"
+    keep_dir.mkdir()
+    (keep_dir / "precious.txt").write_text("keep")
+    with pytest.raises(ValueError, match="existing directory"):
+        mcp_server.detect_extremes(str(paths["cmip"]), out=str(keep_dir))
+    assert (keep_dir / "precious.txt").read_text() == "keep"
+
+    fake_zarr = tmp_path / "fake.zarr"
+    fake_zarr.mkdir()
+    (fake_zarr / "precious.txt").write_text("keep")
+    with pytest.raises(ValueError, match="non-Zarr directory"):
+        mcp_server.detect_extremes(str(paths["cmip"]), out=str(fake_zarr))
+    assert (fake_zarr / "precious.txt").read_text() == "keep"
+
+    # Single-point region slice + squeeze_singleton=True preserves the sliced spatial dim
+    out_pt = tmp_path / "single_lat_slice.nc"
+    det_pt = mcp_server.detect_extremes(
+        str(paths["oisst"]),
+        out=str(out_pt),
+        var="sst",
+        squeeze_singleton=True,
+        region={"lat": [-30.0, -30.0], "lon": [150.0, 151.0]},
+    )
+    assert det_pt["spatial_dims"] == ["lat", "lon"]
+    assert det_pt["spatial_shape"] == [1, 2]
+
+    # Reject invalid region specs (time dim, non-monotonic coord, NaN bound, bool bound)
+    with pytest.raises(ValueError, match="time dimension"):
+        mcp_server.detect_extremes(
+            str(paths["cmip"]),
+            out=str(tmp_path / "bad_time_reg.nc"),
+            region={"time": [2000, 2001]},
+        )
+    with pytest.raises(ValueError, match="finite"):
+        mcp_server.detect_extremes(
+            str(paths["oisst"]),
+            out=str(tmp_path / "bad_nan_reg.nc"),
+            var="sst",
+            region={"lat": [float("nan"), -29.0]},
+        )
+    with pytest.raises(TypeError, match="numeric"):
+        mcp_server.detect_extremes(
+            str(paths["oisst"]),
+            out=str(tmp_path / "bad_bool_reg.nc"),
+            var="sst",
+            region={"lat": [False, True]},  # type: ignore[dict-item]
+        )
+
+    non_mono_nc = tmp_path / "non_mono.nc"
+    xr.Dataset(
+        {"tos": (("time", "lon"), np.ones((5, 3)))},
+        coords={"time": pd.date_range("2000-01-01", periods=5), "lon": [180.0, 190.0, 10.0]},
+    ).to_netcdf(non_mono_nc)
+    with pytest.raises(ValueError, match="monotonic"):
+        mcp_server.detect_extremes(
+            str(non_mono_nc),
+            out=str(tmp_path / "bad_mono.nc"),
+            region={"lon": [10.0, 190.0]},
+        )
+
+    # Literal filename containing '[' must not fail glob expansion
+    bracket_nc = tmp_path / "sst[v2].nc"
+    bracket_nc.write_bytes(paths["cmip"].read_bytes())
+    info_br = mcp_server.inspect_dataset(str(bracket_nc))
+    assert info_br["recommended_var"] == "tos"
+
+
+def test_query_events_and_summarize_edge_cases(tmp_path: Path):
+    cftime = pytest.importorskip("cftime")
+    paths = _write_sample_datasets(tmp_path)
+    out_nc = tmp_path / "events.nc"
+    mcp_server.detect_extremes(
+        str(paths["oisst"]),
+        out=str(out_nc),
+        var="sst",
+        squeeze_singleton="zlev",
+        event="both",
+    )
+
+    # Partial YYYY / YYYY-MM date filters work properly via calendar keys; invalid dates raise ValueError
+    q_year = mcp_server.query_events(str(out_nc), start_date="2001", end_date="2002", limit=500)
+    assert q_year["total_matched"] > 0
+    assert any(ev["date_start"].startswith("2002-") for ev in q_year["events"])
+    assert all("2001-01-01" <= ev["date_start"] <= "2002-12-31" for ev in q_year["events"])
+
+    with pytest.raises(ValueError, match="Could not parse date"):
+        mcp_server.query_events(str(out_nc), end_date="not-a-date")
+
+    # event_type="both" is allowed; invalid event_type raises ValueError even when limit=0 / empty
+    q_both = mcp_server.query_events(str(out_nc), event_type="both", limit=0)
+    assert q_both["total_matched"] > 0 and q_both["returned"] == 0 and q_both["events"] == []
+    with pytest.raises(ValueError, match="Unsupported event_type"):
+        mcp_server.query_events(str(out_nc), event_type="bogus")
+    with pytest.raises(ValueError, match="limit must be >= 0"):
+        mcp_server.query_events(str(out_nc), limit=-1)
+
+    # coords={"method": ...} cannot hijack EventCatalog.sel(method=...), and sort_by validates on empty df
+    with pytest.raises(KeyError, match="unexpected"):
+        mcp_server.query_events(str(out_nc), coords={"method": "exact", "lat": -30.0, "lon": 150.0})
+    with pytest.raises(KeyError, match="Unknown sort_by"):
+        mcp_server.query_events(
+            str(out_nc),
+            coords={"lat": -30.0, "lon": 150.0},
+            min_duration=99999,
+            sort_by="no_such_col",
+        )
+
+    # Empty event catalog (0 events) + NaN int_max guard + all-NaN spatial coord without RuntimeWarning
+    const_nc = tmp_path / "const_empty.nc"
+    dates = pd.date_range("2000-01-01", periods=400, freq="D")
+    xr.Dataset(
+        {
+            "sst": (
+                ("time", "y", "x"),
+                np.full((400, 2, 2), 20.0),
+                {"units": "degK"},
+            ),
+        },
+        coords={
+            "time": dates,
+            "y": [float("nan"), float("nan")],
+            "x": [0.0, 1.0],
+            "lat2d": (("y", "x"), np.array([[0.0, 1.0], [2.0, 3.0]])),
+        },
+    ).to_netcdf(const_nc)
+
+    with warnings.catch_warnings(record=True) as wlog:
+        warnings.simplefilter("always", RuntimeWarning)
+        info_k = mcp_server.inspect_dataset(str(const_nc), var="sst")
+        assert any("Kelvin" in n for n in info_k["notes"])
+        assert any("Multidimensional coordinates" in n for n in info_k["notes"])
+        assert info_k["spatial_coords"]["y"] == {"size": 2, "min": None, "max": None}
+
+        out_empty = tmp_path / "empty_res.nc"
+        mcp_server.detect_extremes(str(const_nc), out=str(out_empty), var="sst")
+        sum_empty = mcp_server.summarize_result(str(out_empty))
+        assert sum_empty["n_events"] == 0
+        assert sum_empty["duration"] == {"min": None, "mean": None, "max": None}
+        assert sum_empty["max_abs_intensity"] is None
+
+        # Non-empty events with all-NaN int_max emit zero RuntimeWarning
+        out_nan_int = tmp_path / "nan_int_max.nc"
+        mcp_server.detect_extremes(
+            str(const_nc),
+            out=str(out_nan_int),
+            var="sst",
+            event="high",
+            baseline_type="fixed_threshold",
+            threshold_high=19.0,
+            threshold_climatology=18.0,
+        )
+        import netCDF4
+
+        with netCDF4.Dataset(out_nan_int, "r+") as nc:
+            nc.groups["events"].variables["int_max"][:] = np.nan
+        sum_nan_int = mcp_server.summarize_result(str(out_nan_int))
+        assert sum_nan_int["n_events"] == 4
+        assert sum_nan_int["max_abs_intensity"] is None
+    assert not [w for w in wlog if issubclass(w.category, RuntimeWarning)]
+
+    with pytest.raises(KeyError, match="Unknown sort_by"):
+        mcp_server.query_events(str(out_empty), sort_by="no_such_col")
+
+    # 5-digit cftime noleap roundtrip proves year extraction does not truncate year >= 10000
+    t_5y = [
+        cftime.DatetimeNoLeap(yr, mo, d)
+        for yr in (10000, 10001, 10002)
+        for mo, nd in ((1, 31), (2, 28), (3, 31), (4, 30), (5, 31), (6, 30), (7, 31), (8, 31), (9, 30), (10, 31), (11, 30), (12, 31))
+        for d in range(1, nd + 1)
+    ]
+    arr_cf = np.full(len(t_5y), 20.0)
+    arr_cf[365 + 30 : 365 + 45] = 26.0
+    cf_nc = tmp_path / "cftime_10000.nc"
+    xr.Dataset(
+        {"tos": (("time", "lat"), arr_cf[:, None], {"units": "degC"})},
+        coords={"time": t_5y, "lat": [-20.0]},
+    ).to_netcdf(cf_nc)
+    out_cf = tmp_path / "cftime_res.nc"
+    mcp_server.detect_extremes(str(cf_nc), out=str(out_cf), event="high")
+    sum_cf = mcp_server.summarize_result(str(out_cf))
+    assert "10001" in sum_cf["by_start_year"]
 
 
 def test_skill_markdown_frontmatter():

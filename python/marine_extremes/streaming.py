@@ -76,6 +76,35 @@ class OpenedInput:
         self.closers.clear()
 
 
+def _squeeze_singleton_dims(
+    da: xr.DataArray,
+    resolved_time_dim: Any,
+    squeeze_singleton: bool | str | Sequence[str],
+) -> xr.DataArray:
+    """Drop requested length-1 non-time dimensions from a normalized DataArray."""
+    if squeeze_singleton is True:
+        drop_dims = [d for d in da.dims if d != resolved_time_dim and da.sizes[d] == 1]
+        if drop_dims:
+            da = da.squeeze(drop_dims, drop=True)
+    elif isinstance(squeeze_singleton, str):
+        if squeeze_singleton in da.dims and squeeze_singleton != resolved_time_dim:
+            if da.sizes[squeeze_singleton] != 1:
+                raise ValueError(
+                    f"Cannot squeeze dim '{squeeze_singleton}' of size {da.sizes[squeeze_singleton]} != 1"
+                )
+            da = da.squeeze(squeeze_singleton, drop=True)
+    elif isinstance(squeeze_singleton, Sequence) and not isinstance(squeeze_singleton, (bytes, bytearray)):
+        to_drop = []
+        for d in squeeze_singleton:
+            if d in da.dims and d != resolved_time_dim:
+                if da.sizes[d] != 1:
+                    raise ValueError(f"Cannot squeeze dim '{d}' of size {da.sizes[d]} != 1")
+                to_drop.append(d)
+        if to_drop:
+            da = da.squeeze(to_drop, drop=True)
+    return da
+
+
 def open_data_input(
     data: Any,
     *,
@@ -171,27 +200,7 @@ def open_data_input(
                 da = xr.DataArray(arr, dims=tuple(dims), coords=coords, name=var or "value")
 
         resolved_time_dim = resolve_time_dim(da, time_dim)
-
-        if squeeze_singleton is True:
-            drop_dims = [d for d in da.dims if d != resolved_time_dim and da.sizes[d] == 1]
-            if drop_dims:
-                da = da.squeeze(drop_dims, drop=True)
-        elif isinstance(squeeze_singleton, str):
-            if squeeze_singleton in da.dims and squeeze_singleton != resolved_time_dim:
-                if da.sizes[squeeze_singleton] != 1:
-                    raise ValueError(
-                        f"Cannot squeeze dim '{squeeze_singleton}' of size {da.sizes[squeeze_singleton]} != 1"
-                    )
-                da = da.squeeze(squeeze_singleton, drop=True)
-        elif isinstance(squeeze_singleton, Sequence) and not isinstance(squeeze_singleton, (bytes, bytearray)):
-            to_drop = []
-            for d in squeeze_singleton:
-                if d in da.dims and d != resolved_time_dim:
-                    if da.sizes[d] != 1:
-                        raise ValueError(f"Cannot squeeze dim '{d}' of size {da.sizes[d]} != 1")
-                    to_drop.append(d)
-            if to_drop:
-                da = da.squeeze(to_drop, drop=True)
+        da = _squeeze_singleton_dims(da, resolved_time_dim, squeeze_singleton)
 
         spatial_dims = tuple(d for d in da.dims if d != resolved_time_dim)
         spatial_shape = tuple(int(da.sizes[d]) for d in spatial_dims)
